@@ -1,0 +1,107 @@
+{
+  "version": "2.0.0",
+  "cells": [
+    {
+      "type": "code",
+      "content": [
+        "e = envi(/headless)",
+        "",
+        "; Open a file",
+        "rasterFile = filepath('qb_boulder_msi', root_dir = e.root_dir, $",
+        "  subdirectory = ['data'])",
+        "raster = e.openRaster(rasterFile)",
+        "",
+        "; Select input ROIs",
+        "roiFile = filepath('qb_boulder_roi.xml', subdir = ['data'], $",
+        "  root_dir = e.root_dir)",
+        "rois = e.openROI(roiFile)",
+        "",
+        "; Open a shapefile",
+        "vectorFile = filepath('lakes.shp', root_dir = e.root_dir, $",
+        "  subdirectory = ['data', 'natural_earth_vectors'])",
+        "vector = e.openVector(vectorFile)"
+      ],
+      "metadata": {},
+      "outputs": []
+    },
+    {
+      "type": "code",
+      "content": [
+        "; display raster",
+        "ENVINotebook.displayInMap, raster"
+      ],
+      "metadata": {},
+      "outputs": []
+    },
+    {
+      "type": "code",
+      "content": [
+        "; add multiple rois",
+        "ENVINotebook.displayInMap, rois"
+      ],
+      "metadata": {},
+      "outputs": []
+    },
+    {
+      "type": "code",
+      "content": [
+        "; add a single ROI",
+        "ENVINotebook.displayInMap, rois[0]"
+      ],
+      "metadata": {},
+      "outputs": []
+    },
+    {
+      "type": "code",
+      "content": [
+        "; add vector and specify color",
+        "ENVINotebook.displayInMap, vector, orderedhash('color', [255,0,0,125])"
+      ],
+      "metadata": {},
+      "outputs": []
+    },
+    {
+      "type": "code",
+      "content": [
+        "; create an empty map",
+        "IDLNotebook.AddToNotebook, {IDLNotebookMap}"
+      ],
+      "metadata": {},
+      "outputs": []
+    },
+    {
+      "type": "code",
+      "content": [
+        "; display geojson from a string",
+        "geojsonOutline = raster.getOutline(3857)",
+        "ENVINotebook.displayInMap, geojsonOutline"
+      ],
+      "metadata": {},
+      "outputs": []
+    },
+    {
+      "type": "code",
+      "content": [
+        "; display more than one layer at a time, order is preserved",
+        "ENVINotebook.displayInMap, raster",
+        "ENVINotebook.displayInMap, rois"
+      ],
+      "metadata": {},
+      "outputs": []
+    },
+    {
+      "type": "code",
+      "content": [
+        "; display geojson from a file",
+        "tmpUri = e.getTemporaryFilename('.json', /cleanup_on_exit)",
+        "openw, lun, tmpUri, /get_lun",
+        "printf, lun, geojsonOutline",
+        "free_lun, lun",
+        "",
+        "ENVINotebook.displayInMap, tmpUri, /is_geojson_uri"
+      ],
+      "metadata": {},
+      "outputs": []
+    }
+  ]
+}
