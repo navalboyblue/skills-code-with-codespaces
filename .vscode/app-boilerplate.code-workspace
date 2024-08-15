@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"uri": "vscode-vfs://github/navalboyblue/app-boilerplate"
+		}
+	],
+	"settings": {}
+}
+              - name: Configure GitHub Pages
+                uses: actions/configure-pages@v5.0.0
+
