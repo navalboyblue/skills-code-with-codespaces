@@ -1,0 +1,1526 @@
+{"status":"1","message":"OK-Missing/Invalid API Key, rate limit of 1/5sec applied","result":[{"SourceCode":"/*\n\n- Bytecode Verification performed was compared on second iteration -\n\nThis file is part of the DAO.\n\nThe DAO is free software: you can redistribute it and/or modify\nit under the terms of the GNU lesser General Public License as published by\nthe Free Software Foundation, either version 3 of the License, or\n(at your option) any later version.\n\nThe DAO is distributed in the hope that it will be useful,\nbut WITHOUT ANY WARRANTY; without even the implied warranty of\nMERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the\nGNU lesser General Public License for more details.\n\nYou should have received a copy of the GNU lesser General Public License\nalong with the DAO.  If not, see <http://www.gnu.org/licenses/>.\n*/\n\n\n/*\nBasic, standardized Token contract with no \"premine\". Defines the functions to\ncheck token balances, send tokens, send tokens on behalf of a 3rd party and the\ncorresponding approval process. Tokens need to be created by a derived\ncontract (e.g. TokenCreation.sol).\n\nThank you ConsenSys, this contract originated from:\nhttps://github.com/ConsenSys/Tokens/blob/master/Token_Contracts/contracts/Standard_Token.sol\nWhich is itself based on the Ethereum standardized contract APIs:\nhttps://github.com/ethereum/wiki/wiki/Standardized_Contract_APIs\n*/\n\n/// @title Standard Token Contract.\n\ncontract TokenInterface {\n    mapping (address => uint256) balances;\n    mapping (address => mapping (address => uint256)) allowed;\n\n    /// Total amount of tokens\n    uint256 public totalSupply;\n\n    /// @param _owner The address from which the balance will be retrieved\n    /// @return The balance\n    function balanceOf(address _owner) constant returns (uint256 balance);\n\n    /// @notice Send `_amount` tokens to `_to` from `msg.sender`\n    /// @param _to The address of the recipient\n    /// @param _amount The amount of tokens to be transferred\n    /// @return Whether the transfer was successful or not\n    function transfer(address _to, uint256 _amount) returns (bool success);\n\n    /// @notice Send `_amount` tokens to `_to` from `_from` on the condition it\n    /// is approved by `_from`\n    /// @param _from The address of the origin of the transfer\n    /// @param _to The address of the recipient\n    /// @param _amount The amount of tokens to be transferred\n    /// @return Whether the transfer was successful or not\n    function transferFrom(address _from, address _to, uint256 _amount) returns (bool success);\n\n    /// @notice `msg.sender` approves `_spender` to spend `_amount` tokens on\n    /// its behalf\n    /// @param _spender The address of the account able to transfer the tokens\n    /// @param _amount The amount of tokens to be approved for transfer\n    /// @return Whether the approval was successful or not\n    function approve(address _spender, uint256 _amount) returns (bool success);\n\n    /// @param _owner The address of the account owning tokens\n    /// @param _spender The address of the account able to transfer the tokens\n    /// @return Amount of remaining tokens of _owner that _spender is allowed\n    /// to spend\n    function allowance(\n        address _owner,\n        address _spender\n    ) constant returns (uint256 remaining);\n\n    event Transfer(address indexed _from, address indexed _to, uint256 _amount);\n    event Approval(\n        address indexed _owner,\n        address indexed _spender,\n        uint256 _amount\n    );\n}\n\n\ncontract Token is TokenInterface {\n    // Protects users by preventing the execution of method calls that\n    // inadvertently also transferred ether\n    modifier noEther() {if (msg.value > 0) throw; _}\n\n    function balanceOf(address _owner) constant returns (uint256 balance) {\n        return balances[_owner];\n    }\n\n    function transfer(address _to, uint256 _amount) noEther returns (bool success) {\n        if (balances[msg.sender] >= _amount && _amount > 0) {\n            balances[msg.sender] -= _amount;\n            balances[_to] += _amount;\n            Transfer(msg.sender, _to, _amount);\n            return true;\n        } else {\n           return false;\n        }\n    }\n\n    function transferFrom(\n        address _from,\n        address _to,\n        uint256 _amount\n    ) noEther returns (bool success) {\n\n        if (balances[_from] >= _amount\n            && allowed[_from][msg.sender] >= _amount\n            && _amount > 0) {\n\n            balances[_to] += _amount;\n            balances[_from] -= _amount;\n            allowed[_from][msg.sender] -= _amount;\n            Transfer(_from, _to, _amount);\n            return true;\n        } else {\n            return false;\n        }\n    }\n\n    function approve(address _spender, uint256 _amount) returns (bool success) {\n        allowed[msg.sender][_spender] = _amount;\n        Approval(msg.sender, _spender, _amount);\n        return true;\n    }\n\n    function allowance(address _owner, address _spender) constant returns (uint256 remaining) {\n        return allowed[_owner][_spender];\n    }\n}\n\n\n/*\nThis file is part of the DAO.\n\nThe DAO is free software: you can redistribute it and/or modify\nit under the terms of the GNU lesser General Public License as published by\nthe Free Software Foundation, either version 3 of the License, or\n(at your option) any later version.\n\nThe DAO is distributed in the hope that it will be useful,\nbut WITHOUT ANY WARRANTY; without even the implied warranty of\nMERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the\nGNU lesser General Public License for more details.\n\nYou should have received a copy of the GNU lesser General Public License\nalong with the DAO.  If not, see <http://www.gnu.org/licenses/>.\n*/\n\n\n/*\nBasic account, used by the DAO contract to separately manage both the rewards \nand the extraBalance accounts. \n*/\n\ncontract ManagedAccountInterface {\n    // The only address with permission to withdraw from this account\n    address public owner;\n    // If true, only the owner of the account can receive ether from it\n    bool public payOwnerOnly;\n    // The sum of ether (in wei) which has been sent to this contract\n    uint public accumulatedInput;\n\n    /// @notice Sends `_amount` of wei to _recipient\n    /// @param _amount The amount of wei to send to `_recipient`\n    /// @param _recipient The address to receive `_amount` of wei\n    /// @return True if the send completed\n    function payOut(address _recipient, uint _amount) returns (bool);\n\n    event PayOut(address indexed _recipient, uint _amount);\n}\n\n\ncontract ManagedAccount is ManagedAccountInterface{\n\n    // The constructor sets the owner of the account\n    function ManagedAccount(address _owner, bool _payOwnerOnly) {\n        owner = _owner;\n        payOwnerOnly = _payOwnerOnly;\n    }\n\n    // When the contract receives a transaction without data this is called. \n    // It counts the amount of ether it receives and stores it in \n    // accumulatedInput.\n    function() {\n        accumulatedInput += msg.value;\n    }\n\n    function payOut(address _recipient, uint _amount) returns (bool) {\n        if (msg.sender != owner || msg.value > 0 || (payOwnerOnly && _recipient != owner))\n            throw;\n        if (_recipient.call.value(_amount)()) {\n            PayOut(_recipient, _amount);\n            return true;\n        } else {\n            return false;\n        }\n    }\n}\n/*\nThis file is part of the DAO.\n\nThe DAO is free software: you can redistribute it and/or modify\nit under the terms of the GNU lesser General Public License as published by\nthe Free Software Foundation, either version 3 of the License, or\n(at your option) any later version.\n\nThe DAO is distributed in the hope that it will be useful,\nbut WITHOUT ANY WARRANTY; without even the implied warranty of\nMERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the\nGNU lesser General Public License for more details.\n\nYou should have received a copy of the GNU lesser General Public License\nalong with the DAO.  If not, see <http://www.gnu.org/licenses/>.\n*/\n\n\n/*\n * Token Creation contract, used by the DAO to create its tokens and initialize\n * its ether. Feel free to modify the divisor method to implement different\n * Token Creation parameters\n*/\n\n\ncontract TokenCreationInterface {\n\n    // End of token creation, in Unix time\n    uint public closingTime;\n    // Minimum fueling goal of the token creation, denominated in tokens to\n    // be created\n    uint public minTokensToCreate;\n    // True if the DAO reached its minimum fueling goal, false otherwise\n    bool public isFueled;\n    // For DAO splits - if privateCreation is 0, then it is a public token\n    // creation, otherwise only the address stored in privateCreation is\n    // allowed to create tokens\n    address public privateCreation;\n    // hold extra ether which has been sent after the DAO token\n    // creation rate has increased\n    ManagedAccount public extraBalance;\n    // tracks the amount of wei given from each contributor (used for refund)\n    mapping (address => uint256) weiGiven;\n\n    /// @dev Constructor setting the minimum fueling goal and the\n    /// end of the Token Creation\n    /// @param _minTokensToCreate Minimum fueling goal in number of\n    ///        Tokens to be created\n    /// @param _closingTime Date (in Unix time) of the end of the Token Creation\n    /// @param _privateCreation Zero means that the creation is public.  A\n    /// non-zero address represents the only address that can create Tokens\n    /// (the address can also create Tokens on behalf of other accounts)\n    // This is the constructor: it can not be overloaded so it is commented out\n    //  function TokenCreation(\n        //  uint _minTokensTocreate,\n        //  uint _closingTime,\n        //  address _privateCreation\n    //  );\n\n    /// @notice Create Token with `_tokenHolder` as the initial owner of the Token\n    /// @param _tokenHolder The address of the Tokens's recipient\n    /// @return Whether the token creation was successful\n    function createTokenProxy(address _tokenHolder) returns (bool success);\n\n    /// @notice Refund `msg.sender` in the case the Token Creation did\n    /// not reach its minimum fueling goal\n    function refund();\n\n    /// @return The divisor used to calculate the token creation rate during\n    /// the creation phase\n    function divisor() constant returns (uint divisor);\n\n    event FuelingToDate(uint value);\n    event CreatedToken(address indexed to, uint amount);\n    event Refund(address indexed to, uint value);\n}\n\n\ncontract TokenCreation is TokenCreationInterface, Token {\n    function TokenCreation(\n        uint _minTokensToCreate,\n        uint _closingTime,\n        address _privateCreation) {\n\n        closingTime = _closingTime;\n        minTokensToCreate = _minTokensToCreate;\n        privateCreation = _privateCreation;\n        extraBalance = new ManagedAccount(address(this), true);\n    }\n\n    function createTokenProxy(address _tokenHolder) returns (bool success) {\n        if (now < closingTime && msg.value > 0\n            && (privateCreation == 0 || privateCreation == msg.sender)) {\n\n            uint token = (msg.value * 20) / divisor();\n            extraBalance.call.value(msg.value - token)();\n            balances[_tokenHolder] += token;\n            totalSupply += token;\n            weiGiven[_tokenHolder] += msg.value;\n            CreatedToken(_tokenHolder, token);\n            if (totalSupply >= minTokensToCreate && !isFueled) {\n                isFueled = true;\n                FuelingToDate(totalSupply);\n            }\n            return true;\n        }\n        throw;\n    }\n\n    function refund() noEther {\n        if (now > closingTime && !isFueled) {\n            // Get extraBalance - will only succeed when called for the first time\n            if (extraBalance.balance >= extraBalance.accumulatedInput())\n                extraBalance.payOut(address(this), extraBalance.accumulatedInput());\n\n            // Execute refund\n            if (msg.sender.call.value(weiGiven[msg.sender])()) {\n                Refund(msg.sender, weiGiven[msg.sender]);\n                totalSupply -= balances[msg.sender];\n                balances[msg.sender] = 0;\n                weiGiven[msg.sender] = 0;\n            }\n        }\n    }\n\n    function divisor() constant returns (uint divisor) {\n        // The number of (base unit) tokens per wei is calculated\n        // as `msg.value` * 20 / `divisor`\n        // The fueling period starts with a 1:1 ratio\n        if (closingTime - 2 weeks > now) {\n            return 20;\n        // Followed by 10 days with a daily creation rate increase of 5%\n        } else if (closingTime - 4 days > now) {\n            return (20 + (now - (closingTime - 2 weeks)) / (1 days));\n        // The last 4 days there is a constant creation rate ratio of 1:1.5\n        } else {\n            return 30;\n        }\n    }\n}\n/*\nThis file is part of the DAO.\n\nThe DAO is free software: you can redistribute it and/or modify\nit under the terms of the GNU lesser General Public License as published by\nthe Free Software Foundation, either version 3 of the License, or\n(at your option) any later version.\n\nThe DAO is distributed in the hope that it will be useful,\nbut WITHOUT ANY WARRANTY; without even the implied warranty of\nMERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the\nGNU lesser General Public License for more details.\n\nYou should have received a copy of the GNU lesser General Public License\nalong with the DAO.  If not, see <http://www.gnu.org/licenses/>.\n*/\n\n\n/*\nStandard smart contract for a Decentralized Autonomous Organization (DAO)\nto automate organizational governance and decision-making.\n*/\n\n\ncontract DAOInterface {\n\n    // The amount of days for which people who try to participate in the\n    // creation by calling the fallback function will still get their ether back\n    uint constant creationGracePeriod = 40 days;\n    // The minimum debate period that a generic proposal can have\n    uint constant minProposalDebatePeriod = 2 weeks;\n    // The minimum debate period that a split proposal can have\n    uint constant minSplitDebatePeriod = 1 weeks;\n    // Period of days inside which it's possible to execute a DAO split\n    uint constant splitExecutionPeriod = 27 days;\n    // Period of time after which the minimum Quorum is halved\n    uint constant quorumHalvingPeriod = 25 weeks;\n    // Period after which a proposal is closed\n    // (used in the case `executeProposal` fails because it throws)\n    uint constant executeProposalPeriod = 10 days;\n    // Denotes the maximum proposal deposit that can be given. It is given as\n    // a fraction of total Ether spent plus balance of the DAO\n    uint constant maxDepositDivisor = 100;\n\n    // Proposals to spend the DAO's ether or to choose a new Curator\n    Proposal[] public proposals;\n    // The quorum needed for each proposal is partially calculated by\n    // totalSupply / minQuorumDivisor\n    uint public minQuorumDivisor;\n    // The unix time of the last time quorum was reached on a proposal\n    uint  public lastTimeMinQuorumMet;\n\n    // Address of the curator\n    address public curator;\n    // The whitelist: List of addresses the DAO is allowed to send ether to\n    mapping (address => bool) public allowedRecipients;\n\n    // Tracks the addresses that own Reward Tokens. Those addresses can only be\n    // DAOs that have split from the original DAO. Conceptually, Reward Tokens\n    // represent the proportion of the rewards that the DAO has the right to\n    // receive. These Reward Tokens are generated when the DAO spends ether.\n    mapping (address => uint) public rewardToken;\n    // Total supply of rewardToken\n    uint public totalRewardToken;\n\n    // The account used to manage the rewards which are to be distributed to the\n    // DAO Token Holders of this DAO\n    ManagedAccount public rewardAccount;\n\n    // The account used to manage the rewards which are to be distributed to\n    // any DAO that holds Reward Tokens\n    ManagedAccount public DAOrewardAccount;\n\n    // Amount of rewards (in wei) already paid out to a certain DAO\n    mapping (address => uint) public DAOpaidOut;\n\n    // Amount of rewards (in wei) already paid out to a certain address\n    mapping (address => uint) public paidOut;\n    // Map of addresses blocked during a vote (not allowed to transfer DAO\n    // tokens). The address points to the proposal ID.\n    mapping (address => uint) public blocked;\n\n    // The minimum deposit (in wei) required to submit any proposal that is not\n    // requesting a new Curator (no deposit is required for splits)\n    uint public proposalDeposit;\n\n    // the accumulated sum of all current proposal deposits\n    uint sumOfProposalDeposits;\n\n    // Contract that is able to create a new DAO (with the same code as\n    // this one), used for splits\n    DAO_Creator public daoCreator;\n\n    // A proposal with `newCurator == false` represents a transaction\n    // to be issued by this DAO\n    // A proposal with `newCurator == true` represents a DAO split\n    struct Proposal {\n        // The address where the `amount` will go to if the proposal is accepted\n        // or if `newCurator` is true, the proposed Curator of\n        // the new DAO).\n        address recipient;\n        // The amount to transfer to `recipient` if the proposal is accepted.\n        uint amount;\n        // A plain text description of the proposal\n        string description;\n        // A unix timestamp, denoting the end of the voting period\n        uint votingDeadline;\n        // True if the proposal's votes have yet to be counted, otherwise False\n        bool open;\n        // True if quorum has been reached, the votes have been counted, and\n        // the majority said yes\n        bool proposalPassed;\n        // A hash to check validity of a proposal\n        bytes32 proposalHash;\n        // Deposit in wei the creator added when submitting their proposal. It\n        // is taken from the msg.value of a newProposal call.\n        uint proposalDeposit;\n        // True if this proposal is to assign a new Curator\n        bool newCurator;\n        // Data needed for splitting the DAO\n        SplitData[] splitData;\n        // Number of Tokens in favor of the proposal\n        uint yea;\n        // Number of Tokens opposed to the proposal\n        uint nay;\n        // Simple mapping to check if a shareholder has voted for it\n        mapping (address => bool) votedYes;\n        // Simple mapping to check if a shareholder has voted against it\n        mapping (address => bool) votedNo;\n        // Address of the shareholder who created the proposal\n        address creator;\n    }\n\n    // Used only in the case of a newCurator proposal.\n    struct SplitData {\n        // The balance of the current DAO minus the deposit at the time of split\n        uint splitBalance;\n        // The total amount of DAO Tokens in existence at the time of split.\n        uint totalSupply;\n        // Amount of Reward Tokens owned by the DAO at the time of split.\n        uint rewardToken;\n        // The new DAO contract created at the time of split.\n        DAO newDAO;\n    }\n\n    // Used to restrict access to certain functions to only DAO Token Holders\n    modifier onlyTokenholders {}\n\n    /// @dev Constructor setting the Curator and the address\n    /// for the contract able to create another DAO as well as the parameters\n    /// for the DAO Token Creation\n    /// @param _curator The Curator\n    /// @param _daoCreator The contract able to (re)create this DAO\n    /// @param _proposalDeposit The deposit to be paid for a regular proposal\n    /// @param _minTokensToCreate Minimum required wei-equivalent tokens\n    ///        to be created for a successful DAO Token Creation\n    /// @param _closingTime Date (in Unix time) of the end of the DAO Token Creation\n    /// @param _privateCreation If zero the DAO Token Creation is open to public, a\n    /// non-zero address means that the DAO Token Creation is only for the address\n    // This is the constructor: it can not be overloaded so it is commented out\n    //  function DAO(\n        //  address _curator,\n        //  DAO_Creator _daoCreator,\n        //  uint _proposalDeposit,\n        //  uint _minTokensToCreate,\n        //  uint _closingTime,\n        //  address _privateCreation\n    //  );\n\n    /// @notice Create Token with `msg.sender` as the beneficiary\n    /// @return Whether the token creation was successful\n    function () returns (bool success);\n\n\n    /// @dev This function is used to send ether back\n    /// to the DAO, it can also be used to receive payments that should not be\n    /// counted as rewards (donations, grants, etc.)\n    /// @return Whether the DAO received the ether successfully\n    function receiveEther() returns(bool);\n\n    /// @notice `msg.sender` creates a proposal to send `_amount` Wei to\n    /// `_recipient` with the transaction data `_transactionData`. If\n    /// `_newCurator` is true, then this is a proposal that splits the\n    /// DAO and sets `_recipient` as the new DAO's Curator.\n    /// @param _recipient Address of the recipient of the proposed transaction\n    /// @param _amount Amount of wei to be sent with the proposed transaction\n    /// @param _description String describing the proposal\n    /// @param _transactionData Data of the proposed transaction\n    /// @param _debatingPeriod Time used for debating a proposal, at least 2\n    /// weeks for a regular proposal, 10 days for new Curator proposal\n    /// @param _newCurator Bool defining whether this proposal is about\n    /// a new Curator or not\n    /// @return The proposal ID. Needed for voting on the proposal\n    function newProposal(\n        address _recipient,\n        uint _amount,\n        string _description,\n        bytes _transactionData,\n        uint _debatingPeriod,\n        bool _newCurator\n    ) onlyTokenholders returns (uint _proposalID);\n\n    /// @notice Check that the proposal with the ID `_proposalID` matches the\n    /// transaction which sends `_amount` with data `_transactionData`\n    /// to `_recipient`\n    /// @param _proposalID The proposal ID\n    /// @param _recipient The recipient of the proposed transaction\n    /// @param _amount The amount of wei to be sent in the proposed transaction\n    /// @param _transactionData The data of the proposed transaction\n    /// @return Whether the proposal ID matches the transaction data or not\n    function checkProposalCode(\n        uint _proposalID,\n        address _recipient,\n        uint _amount,\n        bytes _transactionData\n    ) constant returns (bool _codeChecksOut);\n\n    /// @notice Vote on proposal `_proposalID` with `_supportsProposal`\n    /// @param _proposalID The proposal ID\n    /// @param _supportsProposal Yes/No - support of the proposal\n    /// @return The vote ID.\n    function vote(\n        uint _proposalID,\n        bool _supportsProposal\n    ) onlyTokenholders returns (uint _voteID);\n\n    /// @notice Checks whether proposal `_proposalID` with transaction data\n    /// `_transactionData` has been voted for or rejected, and executes the\n    /// transaction in the case it has been voted for.\n    /// @param _proposalID The proposal ID\n    /// @param _transactionData The data of the proposed transaction\n    /// @return Whether the proposed transaction has been executed or not\n    function executeProposal(\n        uint _proposalID,\n        bytes _transactionData\n    ) returns (bool _success);\n\n    /// @notice ATTENTION! I confirm to move my remaining ether to a new DAO\n    /// with `_newCurator` as the new Curator, as has been\n    /// proposed in proposal `_proposalID`. This will burn my tokens. This can\n    /// not be undone and will split the DAO into two DAO's, with two\n    /// different underlying tokens.\n    /// @param _proposalID The proposal ID\n    /// @param _newCurator The new Curator of the new DAO\n    /// @dev This function, when called for the first time for this proposal,\n    /// will create a new DAO and send the sender's portion of the remaining\n    /// ether and Reward Tokens to the new DAO. It will also burn the DAO Tokens\n    /// of the sender.\n    function splitDAO(\n        uint _proposalID,\n        address _newCurator\n    ) returns (bool _success);\n\n    /// @dev can only be called by the DAO itself through a proposal\n    /// updates the contract of the DAO by sending all ether and rewardTokens\n    /// to the new DAO. The new DAO needs to be approved by the Curator\n    /// @param _newContract the address of the new contract\n    function newContract(address _newContract);\n\n\n    /// @notice Add a new possible recipient `_recipient` to the whitelist so\n    /// that the DAO can send transactions to them (using proposals)\n    /// @param _recipient New recipient address\n    /// @dev Can only be called by the current Curator\n    /// @return Whether successful or not\n    function changeAllowedRecipients(address _recipient, bool _allowed) external returns (bool _success);\n\n\n    /// @notice Change the minimum deposit required to submit a proposal\n    /// @param _proposalDeposit The new proposal deposit\n    /// @dev Can only be called by this DAO (through proposals with the\n    /// recipient being this DAO itself)\n    function changeProposalDeposit(uint _proposalDeposit) external;\n\n    /// @notice Move rewards from the DAORewards managed account\n    /// @param _toMembers If true rewards are moved to the actual reward account\n    ///                   for the DAO. If not then it's moved to the DAO itself\n    /// @return Whether the call was successful\n    function retrieveDAOReward(bool _toMembers) external returns (bool _success);\n\n    /// @notice Get my portion of the reward that was sent to `rewardAccount`\n    /// @return Whether the call was successful\n    function getMyReward() returns(bool _success);\n\n    /// @notice Withdraw `_account`'s portion of the reward from `rewardAccount`\n    /// to `_account`'s balance\n    /// @return Whether the call was successful\n    function withdrawRewardFor(address _account) internal returns (bool _success);\n\n    /// @notice Send `_amount` tokens to `_to` from `msg.sender`. Prior to this\n    /// getMyReward() is called.\n    /// @param _to The address of the recipient\n    /// @param _amount The amount of tokens to be transfered\n    /// @return Whether the transfer was successful or not\n    function transferWithoutReward(address _to, uint256 _amount) returns (bool success);\n\n    /// @notice Send `_amount` tokens to `_to` from `_from` on the condition it\n    /// is approved by `_from`. Prior to this getMyReward() is called.\n    /// @param _from The address of the sender\n    /// @param _to The address of the recipient\n    /// @param _amount The amount of tokens to be transfered\n    /// @return Whether the transfer was successful or not\n    function transferFromWithoutReward(\n        address _from,\n        address _to,\n        uint256 _amount\n    ) returns (bool success);\n\n    /// @notice Doubles the 'minQuorumDivisor' in the case quorum has not been\n    /// achieved in 52 weeks\n    /// @return Whether the change was successful or not\n    function halveMinQuorum() returns (bool _success);\n\n    /// @return total number of proposals ever created\n    function numberOfProposals() constant returns (uint _numberOfProposals);\n\n    /// @param _proposalID Id of the new curator proposal\n    /// @return Address of the new DAO\n    function getNewDAOAddress(uint _proposalID) constant returns (address _newDAO);\n\n    /// @param _account The address of the account which is checked.\n    /// @return Whether the account is blocked (not allowed to transfer tokens) or not.\n    function isBlocked(address _account) internal returns (bool);\n\n    /// @notice If the caller is blocked by a proposal whose voting deadline\n    /// has exprired then unblock him.\n    /// @return Whether the account is blocked (not allowed to transfer tokens) or not.\n    function unblockMe() returns (bool);\n\n    event ProposalAdded(\n        uint indexed proposalID,\n        address recipient,\n        uint amount,\n        bool newCurator,\n        string description\n    );\n    event Voted(uint indexed proposalID, bool position, address indexed voter);\n    event ProposalTallied(uint indexed proposalID, bool result, uint quorum);\n    event NewCurator(address indexed _newCurator);\n    event AllowedRecipientChanged(address indexed _recipient, bool _allowed);\n}\n\n// The DAO contract itself\ncontract DAO is DAOInterface, Token, TokenCreation {\n\n    // Modifier that allows only shareholders to vote and create new proposals\n    modifier onlyTokenholders {\n        if (balanceOf(msg.sender) == 0) throw;\n            _\n    }\n\n    function DAO(\n        address _curator,\n        DAO_Creator _daoCreator,\n        uint _proposalDeposit,\n        uint _minTokensToCreate,\n        uint _closingTime,\n        address _privateCreation\n    ) TokenCreation(_minTokensToCreate, _closingTime, _privateCreation) {\n\n        curator = _curator;\n        daoCreator = _daoCreator;\n        proposalDeposit = _proposalDeposit;\n        rewardAccount = new ManagedAccount(address(this), false);\n        DAOrewardAccount = new ManagedAccount(address(this), false);\n        if (address(rewardAccount) == 0)\n            throw;\n        if (address(DAOrewardAccount) == 0)\n            throw;\n        lastTimeMinQuorumMet = now;\n        minQuorumDivisor = 5; // sets the minimal quorum to 20%\n        proposals.length = 1; // avoids a proposal with ID 0 because it is used\n\n        allowedRecipients[address(this)] = true;\n        allowedRecipients[curator] = true;\n    }\n\n    function () returns (bool success) {\n        if (now < closingTime + creationGracePeriod && msg.sender != address(extraBalance))\n            return createTokenProxy(msg.sender);\n        else\n            return receiveEther();\n    }\n\n\n    function receiveEther() returns (bool) {\n        return true;\n    }\n\n\n    function newProposal(\n        address _recipient,\n        uint _amount,\n        string _description,\n        bytes _transactionData,\n        uint _debatingPeriod,\n        bool _newCurator\n    ) onlyTokenholders returns (uint _proposalID) {\n\n        // Sanity check\n        if (_newCurator && (\n            _amount != 0\n            || _transactionData.length != 0\n            || _recipient == curator\n            || msg.value > 0\n            || _debatingPeriod < minSplitDebatePeriod)) {\n            throw;\n        } else if (\n            !_newCurator\n            && (!isRecipientAllowed(_recipient) || (_debatingPeriod <  minProposalDebatePeriod))\n        ) {\n            throw;\n        }\n\n        if (_debatingPeriod > 8 weeks)\n            throw;\n\n        if (!isFueled\n            || now < closingTime\n            || (msg.value < proposalDeposit && !_newCurator)) {\n\n            throw;\n        }\n\n        if (now + _debatingPeriod < now) // prevents overflow\n            throw;\n\n        // to prevent a 51% attacker to convert the ether into deposit\n        if (msg.sender == address(this))\n            throw;\n\n        _proposalID = proposals.length++;\n        Proposal p = proposals[_proposalID];\n        p.recipient = _recipient;\n        p.amount = _amount;\n        p.description = _description;\n        p.proposalHash = sha3(_recipient, _amount, _transactionData);\n        p.votingDeadline = now + _debatingPeriod;\n        p.open = true;\n        //p.proposalPassed = False; // that's default\n        p.newCurator = _newCurator;\n        if (_newCurator)\n            p.splitData.length++;\n        p.creator = msg.sender;\n        p.proposalDeposit = msg.value;\n\n        sumOfProposalDeposits += msg.value;\n\n        ProposalAdded(\n            _proposalID,\n            _recipient,\n            _amount,\n            _newCurator,\n            _description\n        );\n    }\n\n\n    function checkProposalCode(\n        uint _proposalID,\n        address _recipient,\n        uint _amount,\n        bytes _transactionData\n    ) noEther constant returns (bool _codeChecksOut) {\n        Proposal p = proposals[_proposalID];\n        return p.proposalHash == sha3(_recipient, _amount, _transactionData);\n    }\n\n\n    function vote(\n        uint _proposalID,\n        bool _supportsProposal\n    ) onlyTokenholders noEther returns (uint _voteID) {\n\n        Proposal p = proposals[_proposalID];\n        if (p.votedYes[msg.sender]\n            || p.votedNo[msg.sender]\n            || now >= p.votingDeadline) {\n\n            throw;\n        }\n\n        if (_supportsProposal) {\n            p.yea += balances[msg.sender];\n            p.votedYes[msg.sender] = true;\n        } else {\n            p.nay += balances[msg.sender];\n            p.votedNo[msg.sender] = true;\n        }\n\n        if (blocked[msg.sender] == 0) {\n            blocked[msg.sender] = _proposalID;\n        } else if (p.votingDeadline > proposals[blocked[msg.sender]].votingDeadline) {\n            // this proposal's voting deadline is further into the future than\n            // the proposal that blocks the sender so make it the blocker\n            blocked[msg.sender] = _proposalID;\n        }\n\n        Voted(_proposalID, _supportsProposal, msg.sender);\n    }\n\n\n    function executeProposal(\n        uint _proposalID,\n        bytes _transactionData\n    ) noEther returns (bool _success) {\n\n        Proposal p = proposals[_proposalID];\n\n        uint waitPeriod = p.newCurator\n            ? splitExecutionPeriod\n            : executeProposalPeriod;\n        // If we are over deadline and waiting period, assert proposal is closed\n        if (p.open && now > p.votingDeadline + waitPeriod) {\n            closeProposal(_proposalID);\n            return;\n        }\n\n        // Check if the proposal can be executed\n        if (now < p.votingDeadline  // has the voting deadline arrived?\n            // Have the votes been counted?\n            || !p.open\n            // Does the transaction code match the proposal?\n            || p.proposalHash != sha3(p.recipient, p.amount, _transactionData)) {\n\n            throw;\n        }\n\n        // If the curator removed the recipient from the whitelist, close the proposal\n        // in order to free the deposit and allow unblocking of voters\n        if (!isRecipientAllowed(p.recipient)) {\n            closeProposal(_proposalID);\n            p.creator.send(p.proposalDeposit);\n            return;\n        }\n\n        bool proposalCheck = true;\n\n        if (p.amount > actualBalance())\n            proposalCheck = false;\n\n        uint quorum = p.yea + p.nay;\n\n        // require 53% for calling newContract()\n        if (_transactionData.length >= 4 && _transactionData[0] == 0x68\n            && _transactionData[1] == 0x37 && _transactionData[2] == 0xff\n            && _transactionData[3] == 0x1e\n            && quorum < minQuorum(actualBalance() + rewardToken[address(this)])) {\n\n                proposalCheck = false;\n        }\n\n        if (quorum >= minQuorum(p.amount)) {\n            if (!p.creator.send(p.proposalDeposit))\n                throw;\n\n            lastTimeMinQuorumMet = now;\n            // set the minQuorum to 20% again, in the case it has been reached\n            if (quorum > totalSupply / 5)\n                minQuorumDivisor = 5;\n        }\n\n        // Execute result\n        if (quorum >= minQuorum(p.amount) && p.yea > p.nay && proposalCheck) {\n            if (!p.recipient.call.value(p.amount)(_transactionData))\n                throw;\n\n            p.proposalPassed = true;\n            _success = true;\n\n            // only create reward tokens when ether is not sent to the DAO itself and\n            // related addresses. Proxy addresses should be forbidden by the curator.\n            if (p.recipient != address(this) && p.recipient != address(rewardAccount)\n                && p.recipient != address(DAOrewardAccount)\n                && p.recipient != address(extraBalance)\n                && p.recipient != address(curator)) {\n\n                rewardToken[address(this)] += p.amount;\n                totalRewardToken += p.amount;\n            }\n        }\n\n        closeProposal(_proposalID);\n\n        // Initiate event\n        ProposalTallied(_proposalID, _success, quorum);\n    }\n\n\n    function closeProposal(uint _proposalID) internal {\n        Proposal p = proposals[_proposalID];\n        if (p.open)\n            sumOfProposalDeposits -= p.proposalDeposit;\n        p.open = false;\n    }\n\n    function splitDAO(\n        uint _proposalID,\n        address _newCurator\n    ) noEther onlyTokenholders returns (bool _success) {\n\n        Proposal p = proposals[_proposalID];\n\n        // Sanity check\n\n        if (now < p.votingDeadline  // has the voting deadline arrived?\n            //The request for a split expires XX days after the voting deadline\n            || now > p.votingDeadline + splitExecutionPeriod\n            // Does the new Curator address match?\n            || p.recipient != _newCurator\n            // Is it a new curator proposal?\n            || !p.newCurator\n            // Have you voted for this split?\n            || !p.votedYes[msg.sender]\n            // Did you already vote on another proposal?\n            || (blocked[msg.sender] != _proposalID && blocked[msg.sender] != 0) )  {\n\n            throw;\n        }\n\n        // If the new DAO doesn't exist yet, create the new DAO and store the\n        // current split data\n        if (address(p.splitData[0].newDAO) == 0) {\n            p.splitData[0].newDAO = createNewDAO(_newCurator);\n            // Call depth limit reached, etc.\n            if (address(p.splitData[0].newDAO) == 0)\n                throw;\n            // should never happen\n            if (this.balance < sumOfProposalDeposits)\n                throw;\n            p.splitData[0].splitBalance = actualBalance();\n            p.splitData[0].rewardToken = rewardToken[address(this)];\n            p.splitData[0].totalSupply = totalSupply;\n            p.proposalPassed = true;\n        }\n\n        // Move ether and assign new Tokens\n        uint fundsToBeMoved =\n            (balances[msg.sender] * p.splitData[0].splitBalance) /\n            p.splitData[0].totalSupply;\n        if (p.splitData[0].newDAO.createTokenProxy.value(fundsToBeMoved)(msg.sender) == false)\n            throw;\n\n\n        // Assign reward rights to new DAO\n        uint rewardTokenToBeMoved =\n            (balances[msg.sender] * p.splitData[0].rewardToken) /\n            p.splitData[0].totalSupply;\n\n        uint paidOutToBeMoved = DAOpaidOut[address(this)] * rewardTokenToBeMoved /\n            rewardToken[address(this)];\n\n        rewardToken[address(p.splitData[0].newDAO)] += rewardTokenToBeMoved;\n        if (rewardToken[address(this)] < rewardTokenToBeMoved)\n            throw;\n        rewardToken[address(this)] -= rewardTokenToBeMoved;\n\n        DAOpaidOut[address(p.splitData[0].newDAO)] += paidOutToBeMoved;\n        if (DAOpaidOut[address(this)] < paidOutToBeMoved)\n            throw;\n        DAOpaidOut[address(this)] -= paidOutToBeMoved;\n\n        // Burn DAO Tokens\n        Transfer(msg.sender, 0, balances[msg.sender]);\n        withdrawRewardFor(msg.sender); // be nice, and get his rewards\n        totalSupply -= balances[msg.sender];\n        balances[msg.sender] = 0;\n        paidOut[msg.sender] = 0;\n        return true;\n    }\n\n    function newContract(address _newContract){\n        if (msg.sender != address(this) || !allowedRecipients[_newContract]) return;\n        // move all ether\n        if (!_newContract.call.value(address(this).balance)()) {\n            throw;\n        }\n\n        //move all reward tokens\n        rewardToken[_newContract] += rewardToken[address(this)];\n        rewardToken[address(this)] = 0;\n        DAOpaidOut[_newContract] += DAOpaidOut[address(this)];\n        DAOpaidOut[address(this)] = 0;\n    }\n\n\n    function retrieveDAOReward(bool _toMembers) external noEther returns (bool _success) {\n        DAO dao = DAO(msg.sender);\n\n        if ((rewardToken[msg.sender] * DAOrewardAccount.accumulatedInput()) /\n            totalRewardToken < DAOpaidOut[msg.sender])\n            throw;\n\n        uint reward =\n            (rewardToken[msg.sender] * DAOrewardAccount.accumulatedInput()) /\n            totalRewardToken - DAOpaidOut[msg.sender];\n        if(_toMembers) {\n            if (!DAOrewardAccount.payOut(dao.rewardAccount(), reward))\n                throw;\n            }\n        else {\n            if (!DAOrewardAccount.payOut(dao, reward))\n                throw;\n        }\n        DAOpaidOut[msg.sender] += reward;\n        return true;\n    }\n\n    function getMyReward() noEther returns (bool _success) {\n        return withdrawRewardFor(msg.sender);\n    }\n\n\n    function withdrawRewardFor(address _account) noEther internal returns (bool _success) {\n        if ((balanceOf(_account) * rewardAccount.accumulatedInput()) / totalSupply < paidOut[_account])\n            throw;\n\n        uint reward =\n            (balanceOf(_account) * rewardAccount.accumulatedInput()) / totalSupply - paidOut[_account];\n        if (!rewardAccount.payOut(_account, reward))\n            throw;\n        paidOut[_account] += reward;\n        return true;\n    }\n\n\n    function transfer(address _to, uint256 _value) returns (bool success) {\n        if (isFueled\n            && now > closingTime\n            && !isBlocked(msg.sender)\n            && transferPaidOut(msg.sender, _to, _value)\n            && super.transfer(_to, _value)) {\n\n            return true;\n        } else {\n            throw;\n        }\n    }\n\n\n    function transferWithoutReward(address _to, uint256 _value) returns (bool success) {\n        if (!getMyReward())\n            throw;\n        return transfer(_to, _value);\n    }\n\n\n    function transferFrom(address _from, address _to, uint256 _value) returns (bool success) {\n        if (isFueled\n            && now > closingTime\n            && !isBlocked(_from)\n            && transferPaidOut(_from, _to, _value)\n            && super.transferFrom(_from, _to, _value)) {\n\n            return true;\n        } else {\n            throw;\n        }\n    }\n\n\n    function transferFromWithoutReward(\n        address _from,\n        address _to,\n        uint256 _value\n    ) returns (bool success) {\n\n        if (!withdrawRewardFor(_from))\n            throw;\n        return transferFrom(_from, _to, _value);\n    }\n\n\n    function transferPaidOut(\n        address _from,\n        address _to,\n        uint256 _value\n    ) internal returns (bool success) {\n\n        uint transferPaidOut = paidOut[_from] * _value / balanceOf(_from);\n        if (transferPaidOut > paidOut[_from])\n            throw;\n        paidOut[_from] -= transferPaidOut;\n        paidOut[_to] += transferPaidOut;\n        return true;\n    }\n\n\n    function changeProposalDeposit(uint _proposalDeposit) noEther external {\n        if (msg.sender != address(this) || _proposalDeposit > (actualBalance() + rewardToken[address(this)])\n            / maxDepositDivisor) {\n\n            throw;\n        }\n        proposalDeposit = _proposalDeposit;\n    }\n\n\n    function changeAllowedRecipients(address _recipient, bool _allowed) noEther external returns (bool _success) {\n        if (msg.sender != curator)\n            throw;\n        allowedRecipients[_recipient] = _allowed;\n        AllowedRecipientChanged(_recipient, _allowed);\n        return true;\n    }\n\n\n    function isRecipientAllowed(address _recipient) internal returns (bool _isAllowed) {\n        if (allowedRecipients[_recipient]\n            || (_recipient == address(extraBalance)\n                // only allowed when at least the amount held in the\n                // extraBalance account has been spent from the DAO\n                && totalRewardToken > extraBalance.accumulatedInput()))\n            return true;\n        else\n            return false;\n    }\n\n    function actualBalance() constant returns (uint _actualBalance) {\n        return this.balance - sumOfProposalDeposits;\n    }\n\n\n    function minQuorum(uint _value) internal constant returns (uint _minQuorum) {\n        // minimum of 20% and maximum of 53.33%\n        return totalSupply / minQuorumDivisor +\n            (_value * totalSupply) / (3 * (actualBalance() + rewardToken[address(this)]));\n    }\n\n\n    function halveMinQuorum() returns (bool _success) {\n        // this can only be called after `quorumHalvingPeriod` has passed or at anytime\n        // by the curator with a delay of at least `minProposalDebatePeriod` between the calls\n        if ((lastTimeMinQuorumMet < (now - quorumHalvingPeriod) || msg.sender == curator)\n            && lastTimeMinQuorumMet < (now - minProposalDebatePeriod)) {\n            lastTimeMinQuorumMet = now;\n            minQuorumDivisor *= 2;\n            return true;\n        } else {\n            return false;\n        }\n    }\n\n    function createNewDAO(address _newCurator) internal returns (DAO _newDAO) {\n        NewCurator(_newCurator);\n        return daoCreator.createDAO(_newCurator, 0, 0, now + splitExecutionPeriod);\n    }\n\n    function numberOfProposals() constant returns (uint _numberOfProposals) {\n        // Don't count index 0. It's used by isBlocked() and exists from start\n        return proposals.length - 1;\n    }\n\n    function getNewDAOAddress(uint _proposalID) constant returns (address _newDAO) {\n        return proposals[_proposalID].splitData[0].newDAO;\n    }\n\n    function isBlocked(address _account) internal returns (bool) {\n        if (blocked[_account] == 0)\n            return false;\n        Proposal p = proposals[blocked[_account]];\n        if (now > p.votingDeadline) {\n            blocked[_account] = 0;\n            return false;\n        } else {\n            return true;\n        }\n    }\n\n    function unblockMe() returns (bool) {\n        return isBlocked(msg.sender);\n    }\n}\n\ncontract DAO_Creator {\n    function createDAO(\n        address _curator,\n        uint _proposalDeposit,\n        uint _minTokensToCreate,\n        uint _closingTime\n    ) returns (DAO _newDAO) {\n\n        return new DAO(\n            _curator,\n            DAO_Creator(this),\n            _proposalDeposit,\n            _minTokensToCreate,\n            _closingTime,\n            msg.sender\n        );\n    }\n}\n","ABI":"[{\"constant\":true,\"inputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"name\":\"proposals\",\"outputs\":[{\"name\":\"recipient\",\"type\":\"address\"},{\"name\":\"amount\",\"type\":\"uint256\"},{\"name\":\"description\",\"type\":\"string\"},{\"name\":\"votingDeadline\",\"type\":\"uint256\"},{\"name\":\"open\",\"type\":\"bool\"},{\"name\":\"proposalPassed\",\"type\":\"bool\"},{\"name\":\"proposalHash\",\"type\":\"bytes32\"},{\"name\":\"proposalDeposit\",\"type\":\"uint256\"},{\"name\":\"newCurator\",\"type\":\"bool\"},{\"name\":\"yea\",\"type\":\"uint256\"},{\"name\":\"nay\",\"type\":\"uint256\"},{\"name\":\"creator\",\"type\":\"address\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_spender\",\"type\":\"address\"},{\"name\":\"_amount\",\"type\":\"uint256\"}],\"name\":\"approve\",\"outputs\":[{\"name\":\"success\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"minTokensToCreate\",\"outputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"rewardAccount\",\"outputs\":[{\"name\":\"\",\"type\":\"address\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"daoCreator\",\"outputs\":[{\"name\":\"\",\"type\":\"address\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"totalSupply\",\"outputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"divisor\",\"outputs\":[{\"name\":\"divisor\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"extraBalance\",\"outputs\":[{\"name\":\"\",\"type\":\"address\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_proposalID\",\"type\":\"uint256\"},{\"name\":\"_transactionData\",\"type\":\"bytes\"}],\"name\":\"executeProposal\",\"outputs\":[{\"name\":\"_success\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_from\",\"type\":\"address\"},{\"name\":\"_to\",\"type\":\"address\"},{\"name\":\"_value\",\"type\":\"uint256\"}],\"name\":\"transferFrom\",\"outputs\":[{\"name\":\"success\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[],\"name\":\"unblockMe\",\"outputs\":[{\"name\":\"\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"totalRewardToken\",\"outputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"actualBalance\",\"outputs\":[{\"name\":\"_actualBalance\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"closingTime\",\"outputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[{\"name\":\"\",\"type\":\"address\"}],\"name\":\"allowedRecipients\",\"outputs\":[{\"name\":\"\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_to\",\"type\":\"address\"},{\"name\":\"_value\",\"type\":\"uint256\"}],\"name\":\"transferWithoutReward\",\"outputs\":[{\"name\":\"success\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[],\"name\":\"refund\",\"outputs\":[],\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_recipient\",\"type\":\"address\"},{\"name\":\"_amount\",\"type\":\"uint256\"},{\"name\":\"_description\",\"type\":\"string\"},{\"name\":\"_transactionData\",\"type\":\"bytes\"},{\"name\":\"_debatingPeriod\",\"type\":\"uint256\"},{\"name\":\"_newCurator\",\"type\":\"bool\"}],\"name\":\"newProposal\",\"outputs\":[{\"name\":\"_proposalID\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[{\"name\":\"\",\"type\":\"address\"}],\"name\":\"DAOpaidOut\",\"outputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"minQuorumDivisor\",\"outputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_newContract\",\"type\":\"address\"}],\"name\":\"newContract\",\"outputs\":[],\"type\":\"function\"},{\"constant\":true,\"inputs\":[{\"name\":\"_owner\",\"type\":\"address\"}],\"name\":\"balanceOf\",\"outputs\":[{\"name\":\"balance\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_recipient\",\"type\":\"address\"},{\"name\":\"_allowed\",\"type\":\"bool\"}],\"name\":\"changeAllowedRecipients\",\"outputs\":[{\"name\":\"_success\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[],\"name\":\"halveMinQuorum\",\"outputs\":[{\"name\":\"_success\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[{\"name\":\"\",\"type\":\"address\"}],\"name\":\"paidOut\",\"outputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_proposalID\",\"type\":\"uint256\"},{\"name\":\"_newCurator\",\"type\":\"address\"}],\"name\":\"splitDAO\",\"outputs\":[{\"name\":\"_success\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"DAOrewardAccount\",\"outputs\":[{\"name\":\"\",\"type\":\"address\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"proposalDeposit\",\"outputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"numberOfProposals\",\"outputs\":[{\"name\":\"_numberOfProposals\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"lastTimeMinQuorumMet\",\"outputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_toMembers\",\"type\":\"bool\"}],\"name\":\"retrieveDAOReward\",\"outputs\":[{\"name\":\"_success\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[],\"name\":\"receiveEther\",\"outputs\":[{\"name\":\"\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_to\",\"type\":\"address\"},{\"name\":\"_value\",\"type\":\"uint256\"}],\"name\":\"transfer\",\"outputs\":[{\"name\":\"success\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"isFueled\",\"outputs\":[{\"name\":\"\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_tokenHolder\",\"type\":\"address\"}],\"name\":\"createTokenProxy\",\"outputs\":[{\"name\":\"success\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[{\"name\":\"_proposalID\",\"type\":\"uint256\"}],\"name\":\"getNewDAOAddress\",\"outputs\":[{\"name\":\"_newDAO\",\"type\":\"address\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_proposalID\",\"type\":\"uint256\"},{\"name\":\"_supportsProposal\",\"type\":\"bool\"}],\"name\":\"vote\",\"outputs\":[{\"name\":\"_voteID\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[],\"name\":\"getMyReward\",\"outputs\":[{\"name\":\"_success\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[{\"name\":\"\",\"type\":\"address\"}],\"name\":\"rewardToken\",\"outputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_from\",\"type\":\"address\"},{\"name\":\"_to\",\"type\":\"address\"},{\"name\":\"_value\",\"type\":\"uint256\"}],\"name\":\"transferFromWithoutReward\",\"outputs\":[{\"name\":\"success\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[{\"name\":\"_owner\",\"type\":\"address\"},{\"name\":\"_spender\",\"type\":\"address\"}],\"name\":\"allowance\",\"outputs\":[{\"name\":\"remaining\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"_proposalDeposit\",\"type\":\"uint256\"}],\"name\":\"changeProposalDeposit\",\"outputs\":[],\"type\":\"function\"},{\"constant\":true,\"inputs\":[{\"name\":\"\",\"type\":\"address\"}],\"name\":\"blocked\",\"outputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"curator\",\"outputs\":[{\"name\":\"\",\"type\":\"address\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[{\"name\":\"_proposalID\",\"type\":\"uint256\"},{\"name\":\"_recipient\",\"type\":\"address\"},{\"name\":\"_amount\",\"type\":\"uint256\"},{\"name\":\"_transactionData\",\"type\":\"bytes\"}],\"name\":\"checkProposalCode\",\"outputs\":[{\"name\":\"_codeChecksOut\",\"type\":\"bool\"}],\"type\":\"function\"},{\"constant\":true,\"inputs\":[],\"name\":\"privateCreation\",\"outputs\":[{\"name\":\"\",\"type\":\"address\"}],\"type\":\"function\"},{\"inputs\":[{\"name\":\"_curator\",\"type\":\"address\"},{\"name\":\"_daoCreator\",\"type\":\"address\"},{\"name\":\"_proposalDeposit\",\"type\":\"uint256\"},{\"name\":\"_minTokensToCreate\",\"type\":\"uint256\"},{\"name\":\"_closingTime\",\"type\":\"uint256\"},{\"name\":\"_privateCreation\",\"type\":\"address\"}],\"type\":\"constructor\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"name\":\"_from\",\"type\":\"address\"},{\"indexed\":true,\"name\":\"_to\",\"type\":\"address\"},{\"indexed\":false,\"name\":\"_amount\",\"type\":\"uint256\"}],\"name\":\"Transfer\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"name\":\"_owner\",\"type\":\"address\"},{\"indexed\":true,\"name\":\"_spender\",\"type\":\"address\"},{\"indexed\":false,\"name\":\"_amount\",\"type\":\"uint256\"}],\"name\":\"Approval\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"name\":\"value\",\"type\":\"uint256\"}],\"name\":\"FuelingToDate\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"name\":\"to\",\"type\":\"address\"},{\"indexed\":false,\"name\":\"amount\",\"type\":\"uint256\"}],\"name\":\"CreatedToken\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"name\":\"to\",\"type\":\"address\"},{\"indexed\":false,\"name\":\"value\",\"type\":\"uint256\"}],\"name\":\"Refund\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"name\":\"proposalID\",\"type\":\"uint256\"},{\"indexed\":false,\"name\":\"recipient\",\"type\":\"address\"},{\"indexed\":false,\"name\":\"amount\",\"type\":\"uint256\"},{\"indexed\":false,\"name\":\"newCurator\",\"type\":\"bool\"},{\"indexed\":false,\"name\":\"description\",\"type\":\"string\"}],\"name\":\"ProposalAdded\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"name\":\"proposalID\",\"type\":\"uint256\"},{\"indexed\":false,\"name\":\"position\",\"type\":\"bool\"},{\"indexed\":true,\"name\":\"voter\",\"type\":\"address\"}],\"name\":\"Voted\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"name\":\"proposalID\",\"type\":\"uint256\"},{\"indexed\":false,\"name\":\"result\",\"type\":\"bool\"},{\"indexed\":false,\"name\":\"quorum\",\"type\":\"uint256\"}],\"name\":\"ProposalTallied\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"name\":\"_newCurator\",\"type\":\"address\"}],\"name\":\"NewCurator\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":true,\"name\":\"_recipient\",\"type\":\"address\"},{\"indexed\":false,\"name\":\"_allowed\",\"type\":\"bool\"}],\"name\":\"AllowedRecipientChanged\",\"type\":\"event\"}]","ContractName":"DAO","CompilerVersion":"v0.3.1-2016-04-12-3ad5e82","OptimizationUsed":"1","Runs":"200","ConstructorArguments":"000000000000000000000000da4a4626d3e16e094de3225a751aab7128e965260000000000000000000000004a574510c7014e4ae985403536074abe582adfc80000000000000000000000000000000000000000000000001bc16d674ec80000000000000000000000000000000000000000000000000a968163f0a57b4000000000000000000000000000000000000000000000000000000000000057495e100000000000000000000000000000000000000000000000000000000000000000","EVMVersion":"Default","Library":"","LicenseType":"","Proxy":"0","Implementation":"","SwarmSource":""}]}
+{
+  "name": "idl-for-vscode",
+  "displayName": "%packageJSON.displayName%",
+  "description": "%packageJSON.description%",
+  "version": "4.5.1",
+  "publisher": "idl",
+  "license": "MIT",
+  "encryption": "yes",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/interactive-data-language/vscode-idl"
+  },
+  "homepage": "https://interactive-data-language.github.io/vscode-idl/",
+  "scripts": {
+    "build-client": "nx run-many --target=build --projects=client,idl-webview --prod",
+    "build-extension": "npm-run-all -s clean build-package-json build-docs build-client build-renderer build-server",
+    "build-docs": "node ./tools/build-and-copy-docs.js",
+    "build-i18n": "nx build i18n && node ./dist/apps/i18n/main.js",
+    "build-package-json": "npm run build-tmlang && npm run build-i18n && nx build package-json && node ./dist/apps/package-json/main.js && prettier --write ./extension/language/schemas/config",
+    "build-renderer": "nx build notebook-renderer --prod",
+    "build-renderer-dev": "nx build notebook-renderer --configuration=development",
+    "build-server": "nx run-many --target=build --projects=server,parsing-worker --prod",
+    "build-tmlang": "nx build tmlang-maker && node ./dist/apps/tmlang-maker/main.js --trace-warnings",
+    "build-test": "nx build vscode-e2e-runner && nx build client-e2e",
+    "clean": "rimraf ./dist",
+    "code-prep": "nx run-many --all --target=lint --fix --parallel=5 && nx format:write",
+    "compliance": "node compliance/compliance.js",
+    "build-test-maker": "nx build test-tokenizer",
+    "make-new-tests": "node ./dist/apps/test-tokenizer/main.js --generate-new-tests",
+    "make-all-tests": "node ./dist/apps/test-tokenizer/main.js --generate-all-tests",
+    "lint-tests": "nx run-many --target=lint --fix --projects=\"tests*\" --parallel=5 &&  nx run-many --target=lint --runInBand --projects=parsing-tokenizer --parallel=5",
+    "format-tests": "nx format:write",
+    "generate-tests": "npm-run-all build-test-maker make-all-tests lint-tests format-tests",
+    "generate-new-tests": "npm-run-all build-test-maker make-new-tests lint-tests format-tests",
+    "test-libs": "nx run-many --target=test --runInBand --projects=\"tests*\" --parallel=5 && nx run-many --target=test --runInBand --projects=parsing-tokenizer --parallel=5",
+    "ng": "nx",
+    "package": "npm i && npm-run-all build-extension pre-package && vsce package",
+    "package-and-test": "npm i && npm-run-all build-extension pre-package test-parsing build-test integration-test && vsce package",
+    "pre-package": "rimraf ./node_modules/__ngcc_entry_points__.json",
+    "pre-dev": "npm-run-all build-package-json build-webview",
+    "make-integration-tests": "npm run package && nx build vscode-e2e-runner && nx build client-e2e",
+    "test-integration": "node dist/apps/vscode-e2e-runner/main.js",
+    "test-everything": "npm-run-all test-libs make-integration-tests test-integration",
+    "test-perf": "node --expose-gc --max-old-space-size=12000 --max-semi-space-size=64 ./dist/apps/performance/main.js",
+    "test-perf-profile": "node --expose-gc --max-old-space-size=12000 --max-semi-space-size=64 --prof ./dist/apps/performance/main.js",
+    "start": "npm run build-package-json && npm run build-renderer-dev && npm run build-docs && nx run-many --target=build --projects=parsing-worker,server,client --watch --parallel",
+    "start-client": "nx run-many --target=build --projects=client --watch --parallel",
+    "start-perf": "nx run-many --target=build --projects=parsing-worker,performance --watch --parallel",
+    "start-notebook": "nx run-many --target=build --projects=notebook-renderer,notebook-components --watch --parallel --configuration=development",
+    "start-server": "nx run-many --target=build --projects=parsing-worker,server --watch --parallel",
+    "start-test": "nx build vscode-e2e-runner && nx build client-e2e --watch",
+    "start-webview": "nx build idl-webview --watch",
+    "post-migrate": "rimraf ./node_modules/.cache",
+    "docs:dev": "vitepress dev extension/docs",
+    "docs:build": "vitepress build extension/docs",
+    "docs:build-hosted": "vitepress build extension/docs --base /vscode-idl/",
+    "docs:preview": "vitepress preview extension/docs"
+  },
+  "dependencies": {
+    "@vscode/debugadapter": "^1.64.0",
+    "@vscode/debugprotocol": "^1.64.0",
+    "ajv": "^8.11.2",
+    "ansi-styles": "^6.1.0",
+    "await-notify": "^1.0.1",
+    "case-anything": "^2.1.13",
+    "chalk": "^4.1.2",
+    "compare-versions": "^6.1.0",
+    "deepmerge": "^4.2.2",
+    "express": "^4.18.2",
+    "fast-copy": "^3.0.0",
+    "fast-equals": "^5.0.1",
+    "fast-glob": "^3.3.1",
+    "fuzzysort": "^2.0.4",
+    "glob-to-regexp": "^0.4.1",
+    "json-schema-resolver": "^2.0.0",
+    "minilog": "^3.1.0",
+    "nanoid": "^3.3.4",
+    "protobufjs": "^7.2.5",
+    "rxjs": "~6.6.0",
+    "tslib": "^2.3.0",
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.11",
+    "vscode-textmate": "^9.0.0",
+    "vscode-uri": "^3.0.8",
+    "zone.js": "0.13.0"
+  },
+  "optionalDependencies": {
+    "@vis/compliance": "^0.2.3"
+  },
+  "devDependencies": {
+    "@angular-devkit/build-angular": "16.2.3",
+    "@angular-devkit/core": "16.2.3",
+    "@angular-devkit/schematics": "16.2.3",
+    "@angular-eslint/eslint-plugin": "~16.0.0",
+    "@angular-eslint/eslint-plugin-template": "~16.0.0",
+    "@angular-eslint/template-parser": "~16.0.0",
+    "@angular/animations": "16.2.6",
+    "@angular/cdk": "16.2.5",
+    "@angular/cli": "~16.2.0",
+    "@angular/common": "16.2.6",
+    "@angular/compiler": "16.2.6",
+    "@angular/compiler-cli": "16.2.6",
+    "@angular/core": "16.2.6",
+    "@angular/elements": "16.2.6",
+    "@angular/forms": "16.2.6",
+    "@angular/language-service": "16.2.6",
+    "@angular/material": "16.2.5",
+    "@angular/platform-browser": "16.2.6",
+    "@angular/platform-browser-dynamic": "16.2.6",
+    "@angular/router": "16.2.6",
+    "@deck.gl/core": "^8.9.32",
+    "@deck.gl/geo-layers": "^8.9.32",
+    "@deck.gl/layers": "^8.9.32",
+    "@deck.gl/mesh-layers": "^8.9.32",
+    "@mapbox/geojson-extent": "^1.0.1",
+    "@mdi/js": "^7.3.67",
+    "@ngbracket/ngx-layout": "^16.1.3",
+    "@ngneat/transloco": "^4.3.0",
+    "@nx/angular": "17.0.2",
+    "@nx/cypress": "17.0.2",
+    "@nx/esbuild": "17.0.2",
+    "@nx/eslint": "17.0.2",
+    "@nx/eslint-plugin": "17.0.2",
+    "@nx/jest": "17.0.2",
+    "@nx/js": "17.0.2",
+    "@nx/node": "17.0.2",
+    "@nx/web": "17.0.2",
+    "@nx/workspace": "17.0.2",
+    "@schematics/angular": "16.2.3",
+    "@swc-node/register": "~1.6.7",
+    "@swc/core": "~1.3.85",
+    "@types/glob-to-regexp": "^0.4.4",
+    "@types/jest": "29.4.4",
+    "@types/mapbox__geojson-extent": "^1.0.2",
+    "@types/mime-types": "^2.1.4",
+    "@types/minilog": "^2.0.31",
+    "@types/node": "^20.2.3",
+    "@types/plist": "^3.0.4",
+    "@types/progress": "^2.0.6",
+    "@types/vscode": "^1.82.0",
+    "@types/vscode-notebook-renderer": "^1.72.0",
+    "@types/web": "^0.0.119",
+    "@typescript-eslint/eslint-plugin": "5.60.1",
+    "@typescript-eslint/parser": "5.60.1",
+    "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "2.21",
+    "@vscode/webview-ui-toolkit": "^1.2.0",
+    "@webcomponents/webcomponentsjs": "^2.8.0",
+    "angular-material-css-vars": "^5.0.3",
+    "axios": "^1.5.0",
+    "chart.js": "^4.4.0",
+    "cypress": "^13.0.0",
+    "esbuild": "0.19.2",
+    "eslint": "8.46.0",
+    "eslint-config-prettier": "9.0.0",
+    "eslint-plugin-cypress": "2.13.4",
+    "eslint-plugin-simple-import-sort": "^10.0.0",
+    "eslint-plugin-unused-imports": "^2.0.0",
+    "expect": "^29.4.3",
+    "get-port": "^7.0.0",
+    "himalaya": "^1.1.0",
+    "jest": "^29.4.3",
+    "jest-environment-jsdom": "^29.4.3",
+    "jest-environment-node": "^29.4.1",
+    "jest-preset-angular": "13.1.1",
+    "json-stringify-pretty-compact": "^3.0.0",
+    "material-icons": "^1.13.12",
+    "mime-types": "^2.1.35",
+    "node-html-markdown": "^1.2.0",
+    "npm-run-all": "^4.1.5",
+    "nx": "17.0.2",
+    "plist": "^3.0.6",
+    "prettier": "2.7.1",
+    "progress": "^2.0.3",
+    "rimraf": "^5.0.5",
+    "terser-webpack-plugin": "^5.3.1",
+    "ts-jest": "29.1.0",
+    "ts-node": "10.9.1",
+    "typescript": "5.1.6",
+    "vitepress": "^1.1.0",
+    "vscode-oniguruma": "^2.0.1",
+    "yaml": "^2.3.3"
+  },
+  "engines": {
+    "vscode": "^1.82.0",
+    "npm": "^9.2 || ^10.0",
+    "node": ">=18.12.1 || ^20.0.0"
+  },
+  "activationEvents": [
+    "workspaceContains:**/*.pro",
+    "workspaceContains:**/*idl.json",
+    "workspaceContains:**/*.task",
+    "workspaceContains:**/*.idlnb",
+    "onWebviewPanel:idlPanel",
+    "onDebug"
+  ],
+  "main": "./dist/apps/client/main",
+  "categories": [
+    "Debuggers",
+    "Formatters",
+    "Linters",
+    "Programming Languages",
+    "Snippets",
+    "Themes"
+  ],
+  "icon": "extension/images/idlicon.png",
+  "contributes": {
+    "breakpoints": [
+      {
+        "language": "idl"
+      }
+    ],
+    "commands": [
+      {
+        "command": "idl.client.fileABug",
+        "title": "%commands.idl.client.fileABug%"
+      },
+      {
+        "command": "idl.client.viewLogs",
+        "title": "%commands.idl.client.viewLogs%"
+      },
+      {
+        "command": "idl.client.viewSettings",
+        "title": "%commands.idl.client.viewSettings%"
+      },
+      {
+        "command": "idl.code.addDocsToFile",
+        "title": "%commands.idl.code.addDocsToFile%"
+      },
+      {
+        "command": "idl.code.disableProblemSetting",
+        "title": "%commands.idl.code.disableProblemSetting%"
+      },
+      {
+        "command": "idl.code.fixProblem",
+        "title": "%commands.idl.code.fixProblem%"
+      },
+      {
+        "command": "idl.code.formatFile",
+        "title": "%commands.idl.code.formatFile%"
+      },
+      {
+        "command": "idl.code.formatWorkspace",
+        "title": "%commands.idl.code.formatWorkspace%"
+      },
+      {
+        "command": "idl.code.generateTask",
+        "title": "%commands.idl.code.generateTask%"
+      },
+      {
+        "command": "idl.code.migrateToDL30API",
+        "title": "%commands.idl.code.migrateToDL30API%"
+      },
+      {
+        "command": "idl.config.specifyIDLDirectory",
+        "title": "%commands.idl.config.specifyIDLDirectory%"
+      },
+      {
+        "command": "idl.config.specifyIDLDirectoryWorkspace",
+        "title": "%commands.idl.config.specifyIDLDirectoryWorkspace%"
+      },
+      {
+        "command": "idl.debug.compileFile",
+        "title": "%commands.idl.debug.compileFile%",
+        "icon": {
+          "light": "extension/images/light/settings.svg",
+          "dark": "extension/images/dark/settings.svg"
+        }
+      },
+      {
+        "command": "idl.debug.executeBatchFile",
+        "title": "%commands.idl.debug.executeBatchFile%"
+      },
+      {
+        "command": "idl.debug.resetIDL",
+        "title": "%commands.idl.debug.resetIDL%",
+        "icon": {
+          "light": "extension/images/light/renew.svg",
+          "dark": "extension/images/dark/renew.svg"
+        }
+      },
+      {
+        "command": "idl.debug.runFile",
+        "title": "%commands.idl.debug.runFile%",
+        "icon": {
+          "light": "extension/images/light/file-play.svg",
+          "dark": "extension/images/dark/file-play.svg"
+        }
+      },
+      {
+        "command": "idl.debug.startIDL",
+        "title": "%commands.idl.debug.startIDL%"
+      },
+      {
+        "command": "idl.debug.startProfiling",
+        "title": "%commands.idl.debug.startProfiling%"
+      },
+      {
+        "command": "idl.debug.stopProfiling",
+        "title": "%commands.idl.debug.stopProfiling%"
+      },
+      {
+        "command": "idl.docs.open",
+        "title": "%commands.idl.docs.open%"
+      },
+      {
+        "command": "idl.docs.openLink",
+        "title": "%commands.idl.docs.openLink%"
+      },
+      {
+        "command": "idl.notebooks.convertToPDF",
+        "title": "%commands.idl.notebooks.convertToPDF%",
+        "icon": {
+          "light": "extension/images/light/pdf.svg",
+          "dark": "extension/images/dark/pdf.svg"
+        }
+      },
+      {
+        "command": "idl.notebooks.helpAsNotebook",
+        "title": "%commands.idl.notebooks.helpAsNotebook%"
+      },
+      {
+        "command": "idl.notebooks.newNotebook",
+        "title": "%commands.idl.notebooks.newNotebook%"
+      },
+      {
+        "command": "idl.notebooks.notebookToProCode",
+        "title": "%commands.idl.notebooks.notebookToProCode%",
+        "icon": {
+          "light": "extension/images/light/transform.svg",
+          "dark": "extension/images/dark/transform.svg"
+        }
+      },
+      {
+        "command": "idl.notebooks.openENVIExample",
+        "title": "%commands.idl.notebooks.openENVIExample%"
+      },
+      {
+        "command": "idl.notebooks.openIDLExample",
+        "title": "%commands.idl.notebooks.openIDLExample%"
+      },
+      {
+        "command": "idl.notebooks.resetIDLKernel",
+        "title": "%commands.idl.notebooks.resetIDLKernel%",
+        "icon": {
+          "light": "extension/images/light/renew.svg",
+          "dark": "extension/images/dark/renew.svg"
+        }
+      },
+      {
+        "command": "idl.notebooks.resetNotebookExamples",
+        "title": "%commands.idl.notebooks.resetNotebookExamples%"
+      },
+      {
+        "command": "idl.notebooks.stopAllIDLKernels",
+        "title": "%commands.idl.notebooks.stopAllIDLKernels%"
+      },
+      {
+        "command": "idl.notebooks.stopIDLKernel",
+        "title": "%commands.idl.notebooks.stopIDLKernel%",
+        "icon": {
+          "light": "extension/images/light/stop.svg",
+          "dark": "extension/images/dark/stop.svg"
+        }
+      },
+      {
+        "command": "idl.terminal.compileFile",
+        "title": "%commands.idl.terminal.compileFile%"
+      },
+      {
+        "command": "idl.terminal.continueExecution",
+        "title": "%commands.idl.terminal.continueExecution%"
+      },
+      {
+        "command": "idl.terminal.executeBatchFile",
+        "title": "%commands.idl.terminal.executeBatchFile%"
+      },
+      {
+        "command": "idl.terminal.pauseExecution",
+        "title": "%commands.idl.terminal.pauseExecution%"
+      },
+      {
+        "command": "idl.terminal.resetIDL",
+        "title": "%commands.idl.terminal.resetIDL%"
+      },
+      {
+        "command": "idl.terminal.runFile",
+        "title": "%commands.idl.terminal.runFile%"
+      },
+      {
+        "command": "idl.terminal.startIDL",
+        "title": "%commands.idl.terminal.startIDL%"
+      },
+      {
+        "command": "idl.terminal.stepIn",
+        "title": "%commands.idl.terminal.stepIn%"
+      },
+      {
+        "command": "idl.terminal.stepOut",
+        "title": "%commands.idl.terminal.stepOut%"
+      },
+      {
+        "command": "idl.terminal.stepOver",
+        "title": "%commands.idl.terminal.stepOver%"
+      },
+      {
+        "command": "idl.webview.start",
+        "title": "%commands.idl.webview.start%"
+      }
+    ],
+    "configuration": [
+      {
+        "type": "object",
+        "title": "%configuration.titles.root%",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      {
+        "type": "object",
+        "title": "%configuration.titles.general%",
+        "additionalProperties": false,
+        "properties": {
+          "idl.debugMode": {
+            "type": "boolean",
+            "default": false,
+            "description": "%configuration.descriptions.debugMode%",
+            "scope": "machine-overridable"
+          }
+        }
+      },
+      {
+        "type": "object",
+        "title": "%configuration.titles.documentation%",
+        "additionalProperties": false,
+        "properties": {
+          "idl.documentation.useOnline": {
+            "type": "boolean",
+            "default": true,
+            "description": "%configuration.descriptions.documentation.useOnline%",
+            "scope": "machine-overridable"
+          },
+          "idl.documentation.localPort": {
+            "type": "number",
+            "default": 3344,
+            "description": "%configuration.descriptions.documentation.localPort%",
+            "scope": "machine-overridable",
+            "minimum": 1024,
+            "maximum": 65535
+          }
+        }
+      },
+      {
+        "type": "object",
+        "title": "%configuration.titles.formatting%",
+        "additionalProperties": false,
+        "properties": {
+          "idl.code.formatting": {
+            "type": "object",
+            "description": "%configuration.descriptions.code.formatting%",
+            "scope": "machine-overridable",
+            "additionalProperties": false,
+            "default": {
+              "autoDoc": false,
+              "autoFix": true,
+              "eol": "lf",
+              "styleAndFormat": true,
+              "tabWidth": 2
+            },
+            "properties": {
+              "autoDoc": {
+                "type": "boolean",
+                "description": "%configuration.properties.code.formatting.autoDoc%"
+              },
+              "autoFix": {
+                "type": "boolean",
+                "description": "%configuration.properties.code.formatting.autoFix%"
+              },
+              "eol": {
+                "type": "string",
+                "description": "%configuration.properties.code.formatting.eol%",
+                "enum": [
+                  "lf",
+                  "crlf"
+                ],
+                "enumDescriptions": [
+                  "%configuration.enumDescriptions.formatting.eol.lf%",
+                  "%configuration.enumDescriptions.formatting.eol.crlf%"
+                ]
+              },
+              "styleAndFormat": {
+                "type": "boolean",
+                "description": "%configuration.properties.code.formatting.styleAndFormat%"
+              },
+              "tabWidth": {
+                "type": "number",
+                "description": "%configuration.properties.code.formatting.tabWidth%"
+              }
+            }
+          },
+          "idl.code.formattingStyle": {
+            "type": "object",
+            "description": "%configuration.descriptions.code.formattingStyle%",
+            "scope": "machine-overridable",
+            "additionalProperties": false,
+            "default": {
+              "quotes": "single",
+              "methods": "dot",
+              "keywords": "lower",
+              "properties": "camel",
+              "control": "lower",
+              "numbers": "lower",
+              "hex": "lower",
+              "octal": "lower",
+              "binary": "lower",
+              "routines": "match",
+              "routineMethods": "camel",
+              "systemVariables": "lower",
+              "localVariables": "match",
+              "structureNames": "pascal"
+            },
+            "properties": {
+              "binary": {
+                "type": "string",
+                "description": "%configuration.properties.code.formattingStyle.binary%",
+                "enum": [
+                  "lower",
+                  "upper",
+                  "none"
+                ],
+                "enumDescriptions": [
+                  "%configuration.enumDescriptions.formatting.style.lower%",
+                  "%configuration.enumDescriptions.formatting.style.upper%",
+                  "%configuration.enumDescriptions.formatting.style.none%"
+                ]
+              },
+              "control": {
+                "type": "string",
+                "description": "%configuration.properties.code.formattingStyle.control%",
+                "enum": [
+                  "lower",
+                  "upper",
+                  "none"
+                ],
+                "enumDescriptions": [
+                  "%configuration.enumDescriptions.formatting.style.lower%",
+                  "%configuration.enumDescriptions.formatting.style.upper%",
+                  "%configuration.enumDescriptions.formatting.style.none%"
+                ]
+              },
+              "hex": {
+                "type": "string",
+                "description": "%configuration.properties.code.formattingStyle.hex%",
+                "enum": [
+                  "lower",
+                  "upper",
+                  "none"
+                ],
+                "enumDescriptions": [
+                  "%configuration.enumDescriptions.formatting.style.lower%",
+                  "%configuration.enumDescriptions.formatting.style.upper%",
+                  "%configuration.enumDescriptions.formatting.style.none%"
+                ]
+              },
+              "keywords": {
+                "type": "string",
+                "description": "%configuration.properties.code.formattingStyle.keywords%",
+                "enum": [
+                  "lower",
+                  "upper",
+                  "none"
+                ],
+                "enumDescriptions": [
+                  "%configuration.enumDescriptions.formatting.style.lower%",
+                  "%configuration.enumDescriptions.formatting.style.upper%",
+                  "%configuration.enumDescriptions.formatting.style.none%"
+                ]
+              },
+              "localVariables": {
+                "type": "string",
+                "description": "%configuration.properties.code.formattingStyle.localVariables%",
+                "enum": [
+                  "match",
+                  "none"
+                ],
+                "enumDescriptions": [
+                  "%configuration.enumDescriptions.formatting.style.match%",
+                  "%configuration.enumDescriptions.formatting.style.none%"
+                ]
+              },
+              "methods": {
+                "type": "string",
+                "description": "%configuration.properties.code.formattingStyle.methods%",
+                "enum": [
+                  "dot",
+                  "arrow",
+                  "none"
+                ],
+                "enumDescriptions": [
+                  "%configuration.enumDescriptions.formatting.style.dot%",
+                  "%configuration.enumDescriptions.formatting.style.arrow%",
+                  "%configuration.enumDescriptions.formatting.style.none%"
+                ]
+              },
+              "numbers": {
+                "type": "string",
+                "description": "%configuration.properties.code.formattingStyle.numbers%",
+                "enum": [
+                  "lower",
+                  "upper",
+                  "none"
+                ],
+                "enumDescriptions": [
+                  "%configuration.enumDescriptions.formatting.style.lower%",
+                  "%configuration.enumDescriptions.formatting.style.upper%",
+                  "%configuration.enumDescriptions.formatting.style.none%"
+                ]
+              },
+              "octal": {
+                "type": "string",
+                "description": "%configuration.properties.code.formattingStyle.octal%",
+                "enum": [
+                  "lower",
+                  "upper",
+                  "none"
+                ],
+                "enumDescriptions": [
+                  "%configuration.enumDescriptions.formatting.style.lower%",
+                  "%configuration.enumDescriptions.formatting.style.upper%",
+                  "%configuration.enumDescriptions.formatting.style.none%"
+                ]
+              },
+              "properties": {
+                "type": "string",
+                "description": "%configuration.properties.code.formattingStyle.properties%",
+                "enum": [
+                  "lower",
+                  "upper",
+                  "match",
+                  "camel",
+                  "pascal",
+                  "none"
+                ],
+                "enumDescriptions": [
+                  "%configuration.enumDescriptions.formatting.style.lower%",
+                  "%configuration.enumDescriptions.formatting.style.upper%",
+                  "%configuration.enumDescriptions.formatting.style.match%",
+                  "%configuration.enumDescriptions.formatting.style.camel%",
+                  "%configuration.enumDescriptions.formatting.style.pascal%",
+                  "%configuration.enumDescriptions.formatting.style.none%"
+                ]
+              },
+              "quotes": {
+                "type": "string",
+                "description": "%configuration.properties.code.formattingStyle.quotes%",
+                "enum": [
+                  "single",
+                  "double",
+                  "none"
+                ],
+                "enumDescriptions": [
+                  "%configuration.enumDescriptions.formatting.style.single%",
+                  "%configuration.enumDescriptions.formatting.style.double%",
+                  "%configuration.enumDescriptions.formatting.style.none%"
+                ]
+              },
+              "routines": {
+                "type": "string",
+                "description": "%configuration.properties.code.formattingStyle.routines%",
+                "enum": [
+                  "match",
+                  "camel",
+                  "pascal",
+                  "none"
+                ],
+                "enumDescriptions": [
+                  "%configuration.enumDescriptions.formatting.style.match%",
+                  "%configuration.enumDescriptions.formatting.style.camel%",
+                  "%configuration.enumDescriptions.formatting.style.pascal%",
+                  "%configuration.enumDescriptions.formatting.style.none%"
+                ]
+              },
+              "routineMethods": {
+                "type": "string",
+                "description": "%configuration.properties.code.formattingStyle.routineMethods%",
+                "enum": [
+                  "match",
+                  "camel",
+                  "pascal",
+                  "none"
+                ],
+                "enumDescriptions": [
+                  "%configuration.enumDescriptions.formatting.style.match%",
+                  "%configuration.enumDescriptions.formatting.style.camel%",
+                  "%configuration.enumDescriptions.formatting.style.pascal%",
+                  "%configuration.enumDescriptions.formatting.style.none%"
+                ]
+              },
+              "structureNames": {
+                "type": "string",
+                "description": "%configuration.properties.code.formattingStyle.structureNames%",
+                "enum": [
+                  "match",
+                  "camel",
+                  "pascal",
+                  "none"
+                ],
+                "enumDescriptions": [
+                  "%configuration.enumDescriptions.formatting.style.match%",
+                  "%configuration.enumDescriptions.formatting.style.camel%",
+                  "%configuration.enumDescriptions.formatting.style.pascal%",
+                  "%configuration.enumDescriptions.formatting.style.none%"
+                ]
+              },
+              "systemVariables": {
+                "type": "string",
+                "description": "%configuration.properties.code.formattingStyle.systemVariables%",
+                "enum": [
+                  "lower",
+                  "upper",
+                  "none"
+                ],
+                "enumDescriptions": [
+                  "%configuration.enumDescriptions.formatting.style.lower%",
+                  "%configuration.enumDescriptions.formatting.style.upper%",
+                  "%configuration.enumDescriptions.formatting.style.none%"
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "type": "object",
+        "title": "%configuration.titles.idl%",
+        "additionalProperties": false,
+        "properties": {
+          "idl.IDL.directory": {
+            "type": "string",
+            "description": "%configuration.descriptions.IDL.directory%",
+            "scope": "machine-overridable"
+          },
+          "idl.IDL.path": {
+            "type": "array",
+            "default": [],
+            "description": "%configuration.descriptions.IDL.path%",
+            "scope": "machine-overridable",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "idl.IDL.addWorkspaceFoldersToPath": {
+            "type": "boolean",
+            "default": true,
+            "description": "%configuration.descriptions.IDL.addWorkspaceFoldersToPath%",
+            "scope": "machine-overridable"
+          },
+          "idl.IDL.appendOrPrependWorkspaceFolders": {
+            "enum": [
+              "prepend",
+              "append"
+            ],
+            "enumDescriptions": [
+              "%configuration.enumDescriptions.workspace.prepend%",
+              "%configuration.enumDescriptions.workspace.append%"
+            ],
+            "default": "prepend",
+            "description": "%configuration.descriptions.IDL.appendOrPrependWorkspaceFolders%",
+            "scope": "machine-overridable"
+          },
+          "idl.IDL.environment": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "%configuration.descriptions.IDL.environment%",
+            "scope": "machine-overridable"
+          },
+          "idl.IDL.history": {
+            "type": "object",
+            "description": "%configuration.descriptions.IDL.history%",
+            "scope": "machine-overridable",
+            "additionalProperties": false,
+            "default": {
+              "enabled": true,
+              "maxSize": 2,
+              "truncateOnStartup": false,
+              "folder": "${.idl}",
+              "fileName": "idl-history.idllog"
+            },
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "description": "%configuration.properties.IDL.history.enabled%"
+              },
+              "maxSize": {
+                "type": "number",
+                "description": "%configuration.properties.IDL.history.maxSize%",
+                "minimum": 0.5
+              },
+              "truncateOnStartup": {
+                "type": "boolean",
+                "description": "%configuration.properties.IDL.history.truncateOnStartup%"
+              },
+              "folder": {
+                "type": "string",
+                "description": "%configuration.properties.IDL.history.folder%"
+              },
+              "fileName": {
+                "type": "string",
+                "description": "%configuration.properties.IDL.history.fileName%"
+              }
+            }
+          }
+        }
+      },
+      {
+        "type": "object",
+        "title": "%configuration.titles.languageServer%",
+        "additionalProperties": false,
+        "properties": {
+          "idl.languageServer.fullParse": {
+            "type": "boolean",
+            "default": true,
+            "description": "%configuration.descriptions.languageServer.fullParse%",
+            "scope": "machine-overridable"
+          }
+        }
+      },
+      {
+        "type": "object",
+        "title": "%configuration.titles.notebooks%",
+        "additionalProperties": false,
+        "properties": {
+          "idl.notebooks.embedGraphics": {
+            "type": "boolean",
+            "default": true,
+            "description": "%configuration.descriptions.notebooks.embedGraphics%",
+            "scope": "machine-overridable"
+          },
+          "idl.notebooks.quietMode": {
+            "type": "boolean",
+            "default": true,
+            "description": "%configuration.descriptions.notebooks.quietMode%",
+            "scope": "machine-overridable"
+          }
+        }
+      },
+      {
+        "type": "object",
+        "title": "%configuration.titles.problems%",
+        "additionalProperties": false,
+        "properties": {
+          "idl.problems.includeProblemsFromIDLPath": {
+            "type": "boolean",
+            "default": true,
+            "description": "%configuration.descriptions.problems.includeProblemsFromIDLPath%",
+            "scope": "machine-overridable"
+          },
+          "idl.problems.includeProblemsFromIDLPackages": {
+            "type": "boolean",
+            "default": false,
+            "description": "%configuration.descriptions.problems.includeProblemsFromIDLPackages%",
+            "scope": "machine-overridable"
+          },
+          "idl.problems.reportProblems": {
+            "type": "boolean",
+            "default": true,
+            "description": "%configuration.descriptions.problems.reportProblems%",
+            "scope": "machine-overridable"
+          },
+          "idl.problems.reportDocsProblems": {
+            "type": "boolean",
+            "default": true,
+            "description": "%configuration.descriptions.problems.reportDocsProblems%",
+            "scope": "machine-overridable"
+          },
+          "idl.problems.ignoreProblems": {
+            "type": "array",
+            "default": [],
+            "description": "%configuration.descriptions.problems.ignoreProblems%",
+            "scope": "machine-overridable",
+            "uniqueItems": true,
+            "items": {
+              "type": [
+                "string"
+              ],
+              "enum": [
+                "after-continuation",
+                "after-main",
+                "ambiguous-keyword-abbreviation",
+                "args-first",
+                "bad-break",
+                "bad-continue",
+                "circular-include",
+                "class-no-params",
+                "colon-in-func",
+                "colon-in-func-method",
+                "docs-invalid-in-out",
+                "docs-invalid-private",
+                "docs-invalid-required",
+                "docs-invalid-type",
+                "docs-left-align",
+                "docs-missing-args",
+                "docs-missing-kws",
+                "docs-missing-prop",
+                "docs-missing-return",
+                "docs-missing-struct",
+                "docs-not-real-param",
+                "docs-param-missing",
+                "docs-prop-too-few-params",
+                "docs-prop-too-many-params",
+                "docs-return-has-no-type",
+                "docs-return-invalid",
+                "docs-return-not-needed",
+                "docs-too-few-params",
+                "docs-too-many-params",
+                "double-token",
+                "duplicate-arg-kw-var-def",
+                "duplicate-func",
+                "duplicate-func-method",
+                "duplicate-kw-def",
+                "duplicate-kw-usage",
+                "duplicate-pro",
+                "duplicate-pro-method",
+                "duplicate-property",
+                "duplicate-struct",
+                "duplicate-sys-var",
+                "embarrassing-file",
+                "embarrassing-token",
+                "empty-comp-opt",
+                "empty-main",
+                "expected-comma",
+                "expected-statement",
+                "illegal-arrow",
+                "illegal-bracket",
+                "illegal-chain",
+                "illegal-colon",
+                "illegal-comma",
+                "illegal-comp-opt",
+                "illegal-dictionary-op",
+                "illegal-hash-op",
+                "illegal-hex-escape",
+                "illegal-include",
+                "illegal-index-type",
+                "illegal-list-op",
+                "illegal-ordered-hash-op",
+                "illegal-paren",
+                "illegal-struct",
+                "illegal-struct-op",
+                "illegal-subscript",
+                "illegal-ternary",
+                "illegal-var-index",
+                "implied-print-nb",
+                "incomplete-ternary",
+                "indexing-error",
+                "init-method-pro",
+                "multiple-comp-opt",
+                "no-args-to-doc",
+                "no-comp-opt",
+                "no-idl2",
+                "no-kws-to-doc",
+                "not-closed",
+                "potential-arr-type-incompatibility",
+                "potential-type-incompatibility",
+                "potential-undefined-var",
+                "potential-var-use-before-def",
+                "ptr-de-ref-ambiguity",
+                "ptr-de-ref-illegal",
+                "ptr-nothing-to-de-ref",
+                "reserved-func",
+                "reserved-func-method",
+                "reserved-pro",
+                "reserved-pro-method",
+                "reserved-var",
+                "return-missing",
+                "return-vals-func",
+                "return-vals-missing-func",
+                "return-vals-pro",
+                "routines-first",
+                "standalone-expression",
+                "string-literal-too-many-args",
+                "todo",
+                "unclosed-main",
+                "unclosed-quote",
+                "undefined-var",
+                "unexpected-closer",
+                "unexpected-comma",
+                "unfinished-dot",
+                "unknown-branch",
+                "unknown-disabled-alias",
+                "unknown-kw",
+                "unknown-structure",
+                "unknown-template-escape",
+                "unknown-token",
+                "unused-var",
+                "use-idl2",
+                "var-use-before-def"
+              ],
+              "enumDescriptions": [
+                "%parsing.errors.35%",
+                "%parsing.errors.3%",
+                "%parsing.errors.103%",
+                "%parsing.errors.47%",
+                "%parsing.errors.67%",
+                "%parsing.errors.66%",
+                "%parsing.errors.106%",
+                "%parsing.errors.81%",
+                "%parsing.errors.14%",
+                "%parsing.errors.15%",
+                "%parsing.errors.53%",
+                "%parsing.errors.56%",
+                "%parsing.errors.54%",
+                "%parsing.errors.55%",
+                "%parsing.errors.59%",
+                "%parsing.errors.48%",
+                "%parsing.errors.50%",
+                "%parsing.errors.80%",
+                "%parsing.errors.52%",
+                "%parsing.errors.79%",
+                "%parsing.errors.63%",
+                "%parsing.errors.64%",
+                "%parsing.errors.82%",
+                "%parsing.errors.83%",
+                "%parsing.errors.60%",
+                "%parsing.errors.61%",
+                "%parsing.errors.62%",
+                "%parsing.errors.57%",
+                "%parsing.errors.58%",
+                "%parsing.errors.16%",
+                "%parsing.errors.72%",
+                "%parsing.errors.24%",
+                "%parsing.errors.26%",
+                "%parsing.errors.73%",
+                "%parsing.errors.75%",
+                "%parsing.errors.23%",
+                "%parsing.errors.25%",
+                "%parsing.errors.74%",
+                "%parsing.errors.27%",
+                "%parsing.errors.28%",
+                "%parsing.errors.5%",
+                "%parsing.errors.4%",
+                "%parsing.errors.41%",
+                "%parsing.errors.34%",
+                "%parsing.errors.43%",
+                "%parsing.errors.68%",
+                "%parsing.errors.8%",
+                "%parsing.errors.19%",
+                "%parsing.errors.78%",
+                "%parsing.errors.10%",
+                "%parsing.errors.9%",
+                "%parsing.errors.40%",
+                "%parsing.errors.89%",
+                "%parsing.errors.87%",
+                "%parsing.errors.70%",
+                "%parsing.errors.11%",
+                "%parsing.errors.91%",
+                "%parsing.errors.86%",
+                "%parsing.errors.88%",
+                "%parsing.errors.18%",
+                "%parsing.errors.17%",
+                "%parsing.errors.85%",
+                "%parsing.errors.84%",
+                "%parsing.errors.13%",
+                "%parsing.errors.105%",
+                "%parsing.errors.109%",
+                "%parsing.errors.98%",
+                "%parsing.errors.95%",
+                "%parsing.errors.76%",
+                "%parsing.errors.45%",
+                "%parsing.errors.49%",
+                "%parsing.errors.38%",
+                "%parsing.errors.39%",
+                "%parsing.errors.51%",
+                "%parsing.errors.0%",
+                "%parsing.errors.92%",
+                "%parsing.errors.90%",
+                "%parsing.errors.100%",
+                "%parsing.errors.102%",
+                "%parsing.errors.96%",
+                "%parsing.errors.94%",
+                "%parsing.errors.93%",
+                "%parsing.errors.30%",
+                "%parsing.errors.37%",
+                "%parsing.errors.29%",
+                "%parsing.errors.36%",
+                "%parsing.errors.12%",
+                "%parsing.errors.31%",
+                "%parsing.errors.21%",
+                "%parsing.errors.22%",
+                "%parsing.errors.20%",
+                "%parsing.errors.32%",
+                "%parsing.errors.108%",
+                "%parsing.errors.65%",
+                "%parsing.errors.6%",
+                "%parsing.errors.33%",
+                "%parsing.errors.46%",
+                "%parsing.errors.99%",
+                "%parsing.errors.1%",
+                "%parsing.errors.44%",
+                "%parsing.errors.69%",
+                "%parsing.errors.2%",
+                "%parsing.errors.107%",
+                "%parsing.errors.97%",
+                "%parsing.errors.77%",
+                "%parsing.errors.71%",
+                "%parsing.errors.7%",
+                "%parsing.errors.104%",
+                "%parsing.errors.42%",
+                "%parsing.errors.101%"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "type": "object",
+        "title": "%configuration.titles.questions%",
+        "additionalProperties": false,
+        "properties": {
+          "idl.dontAsk": {
+            "type": "object",
+            "description": "%configuration.descriptions.dontAsk%",
+            "scope": "machine-overridable",
+            "additionalProperties": false,
+            "default": {
+              "forIDLDir": false,
+              "forIconChange": false,
+              "forFormatterChange": false,
+              "toOpenDocs": false
+            },
+            "properties": {
+              "forIDLDir": {
+                "type": "boolean",
+                "default": false,
+                "description": "%configuration.descriptions.dontAsk.forIDLDir%"
+              },
+              "forIconChange": {
+                "type": "boolean",
+                "default": false,
+                "description": "%configuration.descriptions.dontAsk.forIconChange%"
+              },
+              "forFormatterChange": {
+                "type": "boolean",
+                "default": false,
+                "description": "%configuration.descriptions.dontAsk.forFormatterChange%"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "configurationDefaults": {
+      "[idl]": {
+        "editor.semanticHighlighting.enabled": true
+      }
+    },
+    "customEditors": [
+      {
+        "viewType": "idl.enviOpener",
+        "displayName": "%envi.openerTitle%",
+        "selector": [
+          {
+            "filenamePattern": "*.dat"
+          },
+          {
+            "filenamePattern": "*.jp2"
+          },
+          {
+            "filenamePattern": "*.jp2000"
+          },
+          {
+            "filenamePattern": "*.nitf"
+          },
+          {
+            "filenamePattern": "*.ntf"
+          },
+          {
+            "filenamePattern": "*.r0"
+          },
+          {
+            "filenamePattern": "*.tif"
+          },
+          {
+            "filenamePattern": "*.tiff"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "idl",
+        "label": "%debugger.idl.label%",
+        "runtime": "node",
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "name",
+              "type",
+              "request"
+            ],
+            "properties": {}
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "idl",
+            "name": "%debugger.idl.name%",
+            "request": "launch"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "%debugger.idl.label%",
+            "description": "%debugger.idl.description%",
+            "body": {
+              "type": "idl",
+              "name": "%debugger.idl.name%",
+              "request": "launch"
+            }
+          }
+        ]
+      }
+    ],
+    "grammars": [
+      {
+        "language": "idl",
+        "scopeName": "source.idl",
+        "path": "extension/language/syntaxes/idl.tmLanguage"
+      },
+      {
+        "language": "idl-log",
+        "scopeName": "source.idl-log",
+        "path": "extension/language/syntaxes/idl-log.tmLanguage"
+      },
+      {
+        "language": "idl-md-injection",
+        "scopeName": "markdown.idl.codeblock",
+        "path": "extension/language/syntaxes/code-blocks.json",
+        "injectTo": [
+          "text.html.markdown"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.block.idl": "idl"
+        }
+      }
+    ],
+    "iconThemes": [
+      {
+        "id": "idl-icons",
+        "label": "%icons.label%",
+        "path": "./extension/icon-theme/vs-seti-icon-theme.json"
+      }
+    ],
+    "jsonValidation": [
+      {
+        "fileMatch": "*.task",
+        "url": "./extension/language/schemas/tasks/schema.json"
+      },
+      {
+        "fileMatch": "*idl.json",
+        "url": "./extension/language/schemas/config/schema.json"
+      }
+    ],
+    "languages": [
+      {
+        "id": "idl",
+        "aliases": [
+          "IDL",
+          "idl"
+        ],
+        "extensions": [
+          ".pro"
+        ],
+        "configuration": "extension/language/syntaxes/language-configuration.json",
+        "mimetypes": [
+          "text/idl",
+          "application/idl"
+        ],
+        "icon": {
+          "dark": "extension/images/dark/idlicon-color.svg",
+          "light": "extension/images/light/idlicon-color.svg"
+        }
+      },
+      {
+        "id": "idl-md-injection",
+        "icon": {
+          "dark": "extension/images/dark/idlicon-color.svg",
+          "light": "extension/images/light/idlicon-color.svg"
+        },
+        "aliases": [
+          "%languages.idlMdInject%"
+        ]
+      },
+      {
+        "id": "idl-notebook",
+        "extensions": [
+          ".idlnb"
+        ],
+        "icon": {
+          "dark": "extension/images/dark/idlicon-color.svg",
+          "light": "extension/images/light/idlicon-color.svg"
+        },
+        "aliases": [
+          "%languages.idlNotebook%"
+        ]
+      },
+      {
+        "id": "idl-log",
+        "mimetypes": [
+          "text/idl-log",
+          "application/idl-log"
+        ],
+        "extensions": [
+          ".idllog"
+        ],
+        "configuration": "extension/language/syntaxes/language-configuration.json",
+        "icon": {
+          "dark": "extension/images/dark/idlicon-color.svg",
+          "light": "extension/images/light/idlicon-color.svg"
+        },
+        "aliases": [
+          "%languages.idlLog%"
+        ]
+      },
+      {
+        "id": "json",
+        "aliases": [
+          "Task",
+          "task"
+        ],
+        "extensions": [
+          ".task"
+        ]
+      },
+      {
+        "id": "json",
+        "aliases": [
+          "Style",
+          "style"
+        ],
+        "extensions": [
+          ".style"
+        ]
+      },
+      {
+        "id": "json",
+        "aliases": [
+          "Model",
+          "model"
+        ],
+        "extensions": [
+          ".model"
+        ]
+      },
+      {
+        "id": "json",
+        "aliases": [
+          "EVS",
+          "evs"
+        ],
+        "extensions": [
+          ".evs"
+        ]
+      },
+      {
+        "id": "json",
+        "aliases": [
+          "EPT",
+          "ept"
+        ],
+        "extensions": [
+          ".ept"
+        ]
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "idl.code.disableProblemSetting",
+          "when": "false"
+        },
+        {
+          "command": "idl.code.fixProblem",
+          "when": "false"
+        },
+        {
+          "command": "idl.docs.openLink",
+          "when": "false"
+        },
+        {
+          "command": "idl.notebooks.helpAsNotebook",
+          "when": "false"
+        },
+        {
+          "command": "idl.webview.start",
+          "when": "false"
+        }
+      ],
+      "debug/toolBar": [
+        {
+          "command": "idl.debug.compileFile",
+          "group": "navigation",
+          "when": "debugType == idl"
+        },
+        {
+          "command": "idl.debug.runFile",
+          "group": "navigation",
+          "when": "debugType == idl"
+        },
+        {
+          "command": "idl.debug.resetIDL",
+          "group": "navigation",
+          "when": "debugType == idl"
+        }
+      ],
+      "notebook/toolbar": [
+        {
+          "command": "idl.notebooks.resetIDLKernel",
+          "group": "status",
+          "when": "resourceExtname == .idlnb"
+        },
+        {
+          "command": "idl.notebooks.stopIDLKernel",
+          "group": "status",
+          "when": "resourceExtname == .idlnb"
+        },
+        {
+          "command": "idl.notebooks.notebookToProCode",
+          "group": "status",
+          "when": "resourceExtname == .idlnb"
+        },
+        {
+          "command": "idl.notebooks.convertToPDF",
+          "group": "status",
+          "when": "resourceExtname == .idlnb"
+        }
+      ]
+    },
+    "notebookRenderer": [
+      {
+        "id": "idl-notebook-renderer",
+        "displayName": "%notebooks.renderer%",
+        "entrypoint": "./dist/apps/notebook/renderer/src/main.js",
+        "mimeTypes": [
+          "idl/notebook-renderer"
+        ],
+        "requiresMessaging": "optional"
+      }
+    ],
+    "notebooks": [
+      {
+        "type": "idl-notebook",
+        "displayName": "%notebooks.title%",
+        "selector": [
+          {
+            "filenamePattern": "*.idlnb"
+          }
+        ]
+      }
+    ],
+    "snippets": [
+      {
+        "language": "idl",
+        "path": "extension/language/snippets/comment-block.json"
+      },
+      {
+        "language": "idl",
+        "path": "extension/language/snippets/idl.json"
+      },
+      {
+        "language": "idl",
+        "path": "extension/language/snippets/loops.json"
+      },
+      {
+        "language": "idl",
+        "path": "extension/language/snippets/conditionals.json"
+      },
+      {
+        "language": "idl",
+        "path": "extension/language/snippets/envi.json"
+      },
+      {
+        "language": "idl",
+        "path": "extension/language/snippets/objects.json"
+      }
+    ],
+    "themes": [
+      {
+        "label": "%themes.new%",
+        "uiTheme": "vs-dark",
+        "path": "extension/language/themes/novus.json"
+      },
+      {
+        "label": "%themes.neon%",
+        "uiTheme": "vs-dark",
+        "path": "extension/language/themes/neon.json"
+      },
+      {
+        "label": "%themes.retro%",
+        "uiTheme": "vs",
+        "path": "extension/language/themes/retro.json"
+      }
+    ],
+    "views": {
+      "idl-view": [
+        {
+          "id": "idl-tree",
+          "name": "%idl.tree.name%"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "idl-view",
+          "title": "IDL",
+          "icon": "extension/images/idlicon.svg"
+        }
+      ]
+    }
+  }
+}

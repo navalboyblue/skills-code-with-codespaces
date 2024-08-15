@@ -1,0 +1,26 @@
+{
+  "name": "parsing-syntax-post-processors",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/parsing/syntax-post-processors/src",
+  "projectType": "library",
+  "targets": {
+    "lint": {
+      "executor": "@nx/eslint:lint",
+      "outputs": ["{options.outputFile}"],
+      "options": {
+        "lintFilePatterns": ["libs/parsing/syntax-post-processors/**/*.ts"]
+      }
+    },
+    "test": {
+      "executor": "@nx/jest:jest",
+      "outputs": [
+        "{workspaceRoot}/coverage/libs/parsing/syntax-post-processors"
+      ],
+      "options": {
+        "jestConfig": "libs/parsing/syntax-post-processors/jest.config.ts",
+        "passWithNoTests": true
+      }
+    }
+  },
+  "tags": []
+}
