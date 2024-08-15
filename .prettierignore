@@ -1,0 +1,20 @@
+# Add files here to ignore them from prettier formatting
+
+/.angular
+/.github
+/.vscode
+/.vscode-test
+/dist
+/coverage
+/idl/test/client-e2e
+routines.json
+global.json
+extension/language/syntaxes/src/*
+idl/routines
+compliance
+/*idl.json
+*settings.json
+apps/test-tokenizer/src/test-maker/cache/cache.json
+.angular
+
+/.nx/cache
